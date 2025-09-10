@@ -1,0 +1,56 @@
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TournamentMode {
+  LEAGUE
+  KNOCKOUT
+  LEAGUE_PLAYOFFS
+}
+
+enum StageKind {
+  GROUP
+  PLAYOFF
+}
+
+model Tournament {
+  id String @id @default(cuid())
+  name String
+  mode TournamentMode
+  description String?
+  additionalInfo String?
+  season String?
+  startDate DateTime?
+  endDate DateTime?
+  timezone String?
+  venue String?
+  venueAddress String?
+  venueImageUrl String?
+  groups Group[]
+  stages Stage[]
+  @@map("tournaments")
+}
+
+model Group {
+  id String @id @default(cuid())
+  name String
+  teamIds String[]
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  tournamentId String
+  @@map("groups")
+}
+
+model Stage {
+  id String @id @default(cuid())
+  name String
+  kind StageKind
+  order Int
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  tournamentId String
+  @@map("stages")
+}
