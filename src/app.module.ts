@@ -6,6 +6,7 @@ import { PrismaModule } from './database/prisma.module';
 import { TournamentsModule } from './modules/tournaments/tournaments.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { MatchesModule } from './modules/matches/matches.module';
+import { VotingModule } from './modules/voting/voting.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { MatchesModule } from './modules/matches/matches.module';
     TournamentsModule,
     TeamsModule,
     MatchesModule,
+    VotingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

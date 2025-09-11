@@ -3081,9 +3081,36 @@ const matches: SeedMatch[] = [
   },
 ];
 
-function createOneMatch(tx: PrismaClient, m: SeedMatch) {
-  return tx.match.create({
-    data: {
+function upsertOneMatch(tx: PrismaClient, m: SeedMatch) {
+  return tx.match.upsert({
+    where: { id: m.id },
+    update: {
+      stageId: m.stageId,
+      groupId: m.groupId ?? null,
+      round: m.round ?? null,
+      date: new Date(m.date),
+      status: m.status,
+      homeTeamId: m.homeTeamId,
+      awayTeamId: m.awayTeamId,
+      homeScore: m.score?.home ?? null,
+      awayScore: m.score?.away ?? null,
+      homeGKIds: m.lineups?.homeGKIds ?? [],
+      awayGKIds: m.lineups?.awayGKIds ?? [],
+      // wyczyść stare eventy i wgraj aktualne
+      events: m.events?.length
+        ? {
+            deleteMany: {}, // usuń wszystkie powiązane eventy
+            create: m.events.map((e) => ({
+              minute: e.minute,
+              type: e.type,
+              playerId: e.playerId,
+              teamId: e.teamId,
+              card: e.card ?? null,
+            })),
+          }
+        : { deleteMany: {} },
+    },
+    create: {
       id: m.id,
       stageId: m.stageId,
       groupId: m.groupId ?? null,
@@ -3237,7 +3264,7 @@ async function main() {
   }
 
   for (const m of matches) {
-    await createOneMatch(prisma, m);
+    await upsertOneMatch(prisma, m);
   }
 
   console.log('✅ Seed finished.');

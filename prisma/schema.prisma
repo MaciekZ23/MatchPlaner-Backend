@@ -49,6 +49,18 @@ enum CardKind {
   SECOND_YELLOW
 }
 
+enum VotingStatus {
+  NOT_STARTED
+  OPEN
+  CLOSED
+}
+
+enum VotingClosePolicyType {
+  ABSOLUTE_DEADLINE
+  NEXT_ROUND_START
+  MANUAL
+}
+
 model Tournament {
   id String @id @default(cuid())
   name String
@@ -128,6 +140,7 @@ model Match {
   homeGKIds   String[]
   awayGKIds   String[]
   events      MatchEvent[]
+  voting      Voting?     @relation("MatchVoting")
   @@map("matches")
 }
 
@@ -141,4 +154,26 @@ model MatchEvent {
   teamId   String
   card     CardKind?
   @@map("match_events")
+}
+
+model Voting {
+  matchId   String   @id
+  match     Match    @relation("MatchVoting", fields: [matchId], references: [id], onDelete: Cascade)
+  status    VotingStatus @default(NOT_STARTED)
+  closeType VotingClosePolicyType?
+  closesAt  DateTime?
+  closedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  summaries MVPVoteSummary[] @relation("VotingSummaries")
+}
+
+
+model MVPVoteSummary {
+  id       String @id @default(cuid())
+  matchId  String
+  playerId String
+  votes    Int    @default(0)
+  match    Voting @relation("VotingSummaries", fields: [matchId], references: [matchId], onDelete: Cascade)
+  @@unique([matchId, playerId])
 }
