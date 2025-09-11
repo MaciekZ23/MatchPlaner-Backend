@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
-import { toTournamentDto } from './tournaments/mapper';
+import { toTournamentDto } from './mapper';
 
 @Injectable()
 export class TournamentsService {

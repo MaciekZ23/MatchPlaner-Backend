@@ -18,6 +18,37 @@ enum StageKind {
   PLAYOFF
 }
 
+enum Position {
+  GK
+  DEF
+  MID
+  FWD
+}
+
+enum HealthStatus {
+  HEALTHY
+  INJURED
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINISHED
+}
+
+enum MatchEventType {
+  GOAL
+  ASSIST
+  OWN_GOAL
+  CARD
+}
+
+enum CardKind {
+  YELLOW
+  RED
+  SECOND_YELLOW
+}
+
 model Tournament {
   id String @id @default(cuid())
   name String
@@ -33,6 +64,7 @@ model Tournament {
   venueImageUrl String?
   groups Group[]
   stages Stage[]
+  teams  Team[]
   @@map("tournaments")
 }
 
@@ -42,6 +74,7 @@ model Group {
   teamIds String[]
   tournament Tournament @relation(fields: [tournamentId], references: [id])
   tournamentId String
+  matches    Match[]
   @@map("groups")
 }
 
@@ -52,5 +85,60 @@ model Stage {
   order Int
   tournament Tournament @relation(fields: [tournamentId], references: [id])
   tournamentId String
+  matches  Match[]
   @@map("stages")
+}
+
+model Team {
+  id           String   @id @default(cuid())   
+  name         String
+  logo         String?                          
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+  tournamentId String
+  players      Player[]
+  homeMatches  Match[]  @relation("HomeTeam")
+  awayMatches  Match[]  @relation("AwayTeam")
+}
+
+model Player {
+  id           String   @id @default(cuid())   
+  team         Team     @relation(fields: [teamId], references: [id])
+  teamId       String
+  name         String
+  position     Position
+  shirtNumber  Int?
+  healthStatus HealthStatus
+}
+
+model Match {
+  id          String      @id @default(cuid())
+  stage       Stage       @relation(fields: [stageId], references: [id])
+  stageId     String
+  group       Group?      @relation(fields: [groupId], references: [id])
+  groupId     String?
+  round       Int?
+  date        DateTime
+  status      MatchStatus
+  homeTeam    Team        @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  homeTeamId  String
+  awayTeam    Team        @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  awayTeamId  String
+  homeScore   Int?
+  awayScore   Int?
+  homeGKIds   String[]
+  awayGKIds   String[]
+  events      MatchEvent[]
+  @@map("matches")
+}
+
+model MatchEvent {
+  id       String         @id @default(cuid())
+  match    Match          @relation(fields: [matchId], references: [id])
+  matchId  String
+  minute   Int
+  type     MatchEventType
+  playerId String
+  teamId   String
+  card     CardKind?
+  @@map("match_events")
 }
