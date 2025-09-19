@@ -7,6 +7,7 @@ import { TournamentsModule } from './modules/tournaments/tournaments.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { MatchesModule } from './modules/matches/matches.module';
 import { VotingModule } from './modules/voting/voting.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { VotingModule } from './modules/voting/voting.module';
     TournamentsModule,
     TeamsModule,
     MatchesModule,
+    AuthModule,
     VotingModule,
   ],
   controllers: [AppController],
