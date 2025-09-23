@@ -129,18 +129,24 @@ model Match {
   group       Group?      @relation(fields: [groupId], references: [id])
   groupId     String?
   round       Int?
+  index       Int?
   date        DateTime
   status      MatchStatus
-  homeTeam    Team        @relation("HomeTeam", fields: [homeTeamId], references: [id])
-  homeTeamId  String
-  awayTeam    Team        @relation("AwayTeam", fields: [awayTeamId], references: [id])
-  awayTeamId  String
+  homeTeam    Team?      @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  homeTeamId  String?
+  awayTeam    Team?        @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  awayTeamId  String?
+  homeSourceKind SlotSource?
+  homeSourceRef String?
+  awaySourceKind SlotSource?
+  awaySourceRef String?
   homeScore   Int?
   awayScore   Int?
   homeGKIds   String[]
   awayGKIds   String[]
   events      MatchEvent[]
   voting      Voting?     @relation("MatchVoting")
+  @@unique([stageId, round, index])
   @@map("matches")
 }
 
@@ -204,3 +210,10 @@ model MVPVote {
   @@unique([matchId, voterHash])
   @@index([matchId, playerId])
 }
+
+enum SlotSource {
+  TEAM
+  WINNER
+  LOSER
+}
+

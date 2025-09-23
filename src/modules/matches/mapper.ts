@@ -18,8 +18,12 @@ export const toMatchDto = (m: MatchWithEvents): MatchDto => ({
   round: m.round ?? undefined,
   date: m.date.toISOString(),
   status: m.status as MatchDto['status'],
-  homeTeamId: m.homeTeamId,
-  awayTeamId: m.awayTeamId,
+  homeTeamId: m.homeTeamId ?? null,
+  awayTeamId: m.awayTeamId ?? null,
+  homeSourceKind: (m.homeSourceKind ?? null) as MatchDto['homeSourceKind'],
+  homeSourceRef: m.homeSourceRef ?? null,
+  awaySourceKind: (m.awaySourceKind ?? null) as MatchDto['awaySourceKind'],
+  awaySourceRef: m.awaySourceRef ?? null,
   score:
     m.homeScore == null && m.awayScore == null
       ? undefined

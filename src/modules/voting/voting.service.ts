@@ -120,18 +120,24 @@ export class VotingService {
       }
     }
 
-    // Kandydaci do głosowania
-    const players = await this.prisma.player.findMany({
-      where: { team: { id: { in: [match.homeTeamId, match.awayTeamId] } } },
-      select: {
-        id: true,
-        teamId: true,
-        name: true,
-        position: true,
-        healthStatus: true,
-        shirtNumber: true,
-      },
-    });
+    // Kandydaci do głosowania (home/away mogą być chwilowo null)
+    const teamIds = [match.homeTeamId, match.awayTeamId].filter(
+      (id): id is string => !!id,
+    );
+
+    const players = teamIds.length
+      ? await this.prisma.player.findMany({
+          where: { team: { id: { in: teamIds } } },
+          select: {
+            id: true,
+            teamId: true,
+            name: true,
+            position: true,
+            healthStatus: true,
+            shirtNumber: true,
+          },
+        })
+      : [];
 
     // Podsumowanie
     const summaries = await this.prisma.mVPVoteSummary.findMany({
@@ -178,6 +184,11 @@ export class VotingService {
     if (!match) {
       throw new NotFoundException('Match not found');
     }
+    if (!match.homeTeamId || !match.awayTeamId) {
+      throw new BadRequestException(
+        'Voting is not available: teams not assigned yet',
+      );
+    }
 
     const now = new Date();
     const voteDeadline = addHours(match.date, VOTING_WINDOW_HOURS);
@@ -218,7 +229,10 @@ export class VotingService {
     if (!player) {
       throw new NotFoundException('Player not found');
     }
-    if (![match.homeTeamId, match.awayTeamId].includes(player.teamId)) {
+    const allowedTeamIds = new Set(
+      [match.homeTeamId, match.awayTeamId].filter((id): id is string => !!id),
+    );
+    if (!allowedTeamIds.has(player.teamId)) {
       throw new BadRequestException('Player does not belong to this match');
     }
 

@@ -8,6 +8,7 @@ import { TeamsModule } from './modules/teams/teams.module';
 import { MatchesModule } from './modules/matches/matches.module';
 import { VotingModule } from './modules/voting/voting.module';
 import { AuthModule } from './auth/auth.module';
+import { PlayoffsModule } from './modules/playoffs/playoffs.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from './auth/auth.module';
     MatchesModule,
     AuthModule,
     VotingModule,
+    PlayoffsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

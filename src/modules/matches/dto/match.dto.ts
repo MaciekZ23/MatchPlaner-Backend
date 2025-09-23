@@ -15,11 +15,22 @@ export class MatchDto {
   @ApiProperty() stageId!: string;
   @ApiPropertyOptional() groupId?: string;
   @ApiPropertyOptional() round?: number;
+  @ApiPropertyOptional() index?: number;
   @ApiProperty() date!: string;
   @ApiProperty({ enum: ['SCHEDULED', 'LIVE', 'FINISHED'] })
   status!: 'SCHEDULED' | 'LIVE' | 'FINISHED';
-  @ApiProperty() homeTeamId!: string;
-  @ApiProperty() awayTeamId!: string;
+  @ApiProperty({ nullable: true, type: String })
+  homeTeamId!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  awayTeamId!: string | null;
+  @ApiProperty({ enum: ['TEAM', 'WINNER', 'LOSER'], nullable: true })
+  homeSourceKind!: 'TEAM' | 'WINNER' | 'LOSER' | null;
+  @ApiProperty({ nullable: true, type: String })
+  homeSourceRef!: string | null;
+  @ApiProperty({ enum: ['TEAM', 'WINNER', 'LOSER'], nullable: true })
+  awaySourceKind!: 'TEAM' | 'WINNER' | 'LOSER' | null;
+  @ApiProperty({ nullable: true, type: String })
+  awaySourceRef!: string | null;
   @ApiPropertyOptional() score?: { home: number; away: number };
   @ApiPropertyOptional({ type: [MatchEventDto] }) events?: MatchEventDto[];
   @ApiPropertyOptional({
