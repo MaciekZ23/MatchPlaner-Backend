@@ -217,3 +217,10 @@ enum SlotSource {
   LOSER
 }
 
+model IdCounter {
+  key   String @id
+  value Int
+  @@map("id_counters")
+}
+
+
