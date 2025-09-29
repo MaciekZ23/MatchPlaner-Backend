@@ -6,6 +6,8 @@ import { toPlayerDto, toTeamDto } from './mapper';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { Prisma } from '@prisma/client';
 import { CreatePlayerDto } from './dto/create-player.dto';
+import { UpdatePlayerDto } from './dto/update-player.dto';
+import { UpdateTeamDto } from './dto/update-team.dto';
 
 @Injectable()
 export class TeamsService {
@@ -144,5 +146,87 @@ export class TeamsService {
     });
 
     return toPlayerDto(created);
+  }
+
+  async updateTeam(teamId: string, body: UpdateTeamDto): Promise<TeamDto> {
+    const exists = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      include: { players: { select: { id: true } } },
+    });
+    if (!exists) {
+      throw new NotFoundException('Druzyna nie znaleziona');
+    }
+
+    const data: Prisma.TeamUpdateInput = {};
+    if (body.name !== undefined) {
+      data.name = body.name;
+    }
+    if (body.logo !== undefined) {
+      data.logo = body.logo ?? null;
+    }
+
+    const updated = await this.prisma.team.update({
+      where: { id: teamId },
+      data,
+      include: { players: { select: { id: true } } },
+    });
+
+    return toTeamDto(updated as any);
+  }
+
+  async deleteTeam(teamId: string): Promise<void> {
+    const team = await this.prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) {
+      throw new NotFoundException('Drużyna nie znaleziona');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.player.deleteMany({ where: { teamId } });
+      await tx.team.delete({ where: { id: teamId } });
+    });
+  }
+
+  async updatePlayer(
+    playerId: string,
+    body: UpdatePlayerDto,
+  ): Promise<PlayerDto> {
+    const exists = await this.prisma.player.findUnique({
+      where: { id: playerId },
+    });
+    if (!exists) {
+      throw new NotFoundException('Zawodnik nie znaleziony');
+    }
+
+    const data: Prisma.PlayerUpdateInput = {};
+    if (body.name !== undefined) {
+      data.name = body.name.trim();
+    }
+    if (body.position !== undefined) {
+      data.position = body.position;
+    }
+    if (body.shirtNumber !== undefined) {
+      data.shirtNumber = body.shirtNumber ?? null;
+    }
+    if (body.healthStatus !== undefined) {
+      data.healthStatus = body.healthStatus;
+    }
+
+    const updated = await this.prisma.player.update({
+      where: { id: playerId },
+      data,
+    });
+
+    return toPlayerDto(updated);
+  }
+
+  async deletePlayer(playerId: string): Promise<void> {
+    const player = await this.prisma.player.findUnique({
+      where: { id: playerId },
+    });
+    if (!player) {
+      throw new NotFoundException('Zawodnik nie znaleziony');
+    }
+
+    await this.prisma.player.delete({ where: { id: playerId } });
   }
 }

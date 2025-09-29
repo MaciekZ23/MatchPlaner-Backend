@@ -1,4 +1,4 @@
-import { Group, Stage, Tournament } from 'generated/prisma';
+import { Group, Stage, Tournament } from '@prisma/client';
 
 export const toTournamentDto = (
   t: Tournament & { groups: Group[]; stages: Stage[] },

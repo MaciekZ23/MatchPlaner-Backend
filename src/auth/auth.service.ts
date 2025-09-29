@@ -5,6 +5,14 @@ import { PrismaService } from 'src/database/prisma.service';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+function isAdminEmail(email: string): boolean {
+  const admins = (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return admins.includes(email.toLowerCase());
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -30,6 +38,9 @@ export class AuthService {
     }
 
     const normalizedAvatar = normalizeGoogleAvatar(payload?.picture ?? null);
+    const desiredRole: 'ADMIN' | 'USER' = isAdminEmail(email)
+      ? 'ADMIN'
+      : 'USER';
 
     let user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
@@ -37,16 +48,17 @@ export class AuthService {
         data: {
           email,
           name: payload.name ?? null,
-          avatarUrl: payload.picture ?? null,
-          role: 'USER',
+          avatarUrl: normalizedAvatar ?? null,
+          role: desiredRole,
         },
       });
     } else {
-      await this.prisma.user.update({
+      user = await this.prisma.user.update({
         where: { id: user.id },
         data: {
-          name: payload.name ?? user.name,
+          name: payload?.name ?? user.name,
           avatarUrl: normalizedAvatar ?? user.avatarUrl,
+          role: desiredRole, // 👈 aktualizuj rolę wg listy
         },
       });
     }
