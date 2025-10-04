@@ -38,6 +38,84 @@ export class TournamentsService {
     return `t${created.value}`;
   }
 
+  private alphaId(index0: number): string {
+    let n = index0 + 1,
+      out = '';
+    while (n > 0) {
+      n--;
+      out = String.fromCharCode(65 + (n % 26)) + out;
+      n = Math.floor(n / 26);
+    }
+    return out;
+  }
+  private alphaToNum(s: string): number {
+    let n = 0;
+    for (const ch of s.toUpperCase()) {
+      const c = ch.charCodeAt(0);
+      if (c < 65 || c > 90) return NaN;
+      n = n * 26 + (c - 64);
+    }
+    return n;
+  }
+
+  private async nextGroupIdTx(tx: Prisma.TransactionClient): Promise<string> {
+    const key = 'group';
+    const existing = await tx.idCounter.findUnique({ where: { key } });
+    if (existing) {
+      const updated = await tx.idCounter.update({
+        where: { key },
+        data: { value: { increment: 1 } },
+      });
+      return this.alphaId(updated.value - 1);
+    }
+    const all = await tx.group.findMany({ select: { id: true } });
+    let max = 0;
+    for (const g of all) {
+      const n = this.alphaToNum(g.id);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    const created = await tx.idCounter.create({
+      data: { key, value: max + 1 },
+    });
+    return this.alphaId(created.value - 1);
+  }
+
+  private async nextStageIdTx(
+    tx: Prisma.TransactionClient,
+    kind: $Enums.StageKind,
+  ): Promise<string> {
+    const isGrp = kind === 'GROUP';
+    const counterKey = isGrp ? 'stage-grp' : 'stage-po';
+    const prefix = isGrp ? 'STAGE-GRP' : 'STAGE-PO';
+
+    const existing = await tx.idCounter.findUnique({
+      where: { key: counterKey },
+    });
+    if (existing) {
+      const updated = await tx.idCounter.update({
+        where: { key: counterKey },
+        data: { value: { increment: 1 } },
+      });
+      return `${prefix}-${updated.value}`;
+    }
+
+    const all = await tx.stage.findMany({
+      where: { kind },
+      select: { id: true },
+    });
+    let max = 0;
+    const re = new RegExp(`^${prefix}-(\\d+)$`, 'i');
+    for (const s of all) {
+      const m = re.exec(s.id);
+      const n = m ? parseInt(m[1], 10) : NaN;
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    const created = await tx.idCounter.create({
+      data: { key: counterKey, value: max + 1 },
+    });
+    return `${prefix}-${created.value}`;
+  }
+
   async findOne(id: string) {
     const t = await this.prisma.tournament.findUnique({
       where: { id },
@@ -59,15 +137,12 @@ export class TournamentsService {
 
       let groupsData:
         | { create: Array<{ id: string; name: string; teamIds: string[] }> }
-        | undefined = undefined;
-      if (dto.groups && dto.groups.length > 0) {
+        | undefined;
+      if (dto.groups?.length) {
         const arr: Array<{ id: string; name: string; teamIds: string[] }> = [];
         for (const g of dto.groups) {
-          arr.push({
-            id: g.id,
-            name: g.name,
-            teamIds: g.teamIds ?? [],
-          });
+          const gid = await this.nextGroupIdTx(tx);
+          arr.push({ id: gid, name: g.name, teamIds: g.teamIds ?? [] });
         }
         groupsData = { create: arr };
       }
@@ -81,8 +156,8 @@ export class TournamentsService {
               order: number;
             }>;
           }
-        | undefined = undefined;
-      if (dto.stages && dto.stages.length > 0) {
+        | undefined;
+      if (dto.stages?.length) {
         const arr: Array<{
           id: string;
           name: string;
@@ -90,8 +165,9 @@ export class TournamentsService {
           order: number;
         }> = [];
         for (const s of dto.stages) {
+          const sid = await this.nextStageIdTx(tx, s.kind as $Enums.StageKind);
           arr.push({
-            id: s.id,
+            id: sid,
             name: s.name,
             kind: s.kind as $Enums.StageKind,
             order: s.order,
@@ -131,65 +207,116 @@ export class TournamentsService {
   }
 
   async update(id: string, dto: UpdateTournamentDto) {
-    const exists = await this.prisma.tournament.findUnique({ where: { id } });
-    if (!exists) {
-      throw new NotFoundException('Tournament not found');
-    }
-
-    const data: Prisma.TournamentUpdateInput = {};
-
-    if (dto.name !== undefined) {
-      data.name = dto.name;
-    }
-    if (dto.mode !== undefined) {
-      data.mode = dto.mode as $Enums.TournamentMode;
-    }
-
-    if (dto.description !== undefined) {
-      data.description = dto.description;
-    }
-    if (dto.additionalInfo !== undefined) {
-      data.additionalInfo = dto.additionalInfo;
-    }
-    if (dto.season !== undefined) {
-      data.season = dto.season;
-    }
-
-    if (dto.startDate !== undefined) {
-      if (dto.startDate === null) {
-        data.startDate = null;
-      } else {
-        data.startDate = new Date(dto.startDate);
+    return this.prisma.$transaction(async (tx) => {
+      const exists = await tx.tournament.findUnique({ where: { id } });
+      if (!exists) {
+        throw new NotFoundException('Tournament not found');
       }
-    }
-    if (dto.endDate !== undefined) {
-      if (dto.endDate === null) {
-        data.endDate = null;
-      } else {
-        data.endDate = new Date(dto.endDate);
+
+      // 1) Metadane turnieju
+      const data: Prisma.TournamentUpdateInput = {};
+      if (dto.name !== undefined) data.name = dto.name;
+      if (dto.mode !== undefined) data.mode = dto.mode as $Enums.TournamentMode;
+
+      if (dto.description !== undefined) data.description = dto.description;
+      if (dto.additionalInfo !== undefined)
+        data.additionalInfo = dto.additionalInfo;
+      if (dto.season !== undefined) data.season = dto.season;
+
+      if (dto.startDate !== undefined) {
+        data.startDate = dto.startDate ? new Date(dto.startDate) : null;
       }
-    }
-    if (dto.timezone !== undefined) {
-      data.timezone = dto.timezone;
-    }
+      if (dto.endDate !== undefined) {
+        data.endDate = dto.endDate ? new Date(dto.endDate) : null;
+      }
+      if (dto.timezone !== undefined) data.timezone = dto.timezone;
+      if (dto.venue !== undefined) data.venue = dto.venue;
+      if (dto.venueAddress !== undefined) data.venueAddress = dto.venueAddress;
+      if (dto.venueImageUrl !== undefined)
+        data.venueImageUrl = dto.venueImageUrl;
 
-    if (dto.venue !== undefined) {
-      data.venue = dto.venue;
-    }
-    if (dto.venueAddress !== undefined) {
-      data.venueAddress = dto.venueAddress;
-    }
-    if (dto.venueImageUrl !== undefined) {
-      data.venueImageUrl = dto.venueImageUrl;
-    }
+      if (Object.keys(data).length > 0) {
+        await tx.tournament.update({ where: { id }, data });
+      }
 
-    const updated = await this.prisma.tournament.update({
-      where: { id },
-      data,
-      include: { groups: true, stages: true },
+      // 2) GRUPY — APPEND
+      if (dto.groupsAppend?.length) {
+        for (const g of dto.groupsAppend) {
+          const gid = await this.nextGroupIdTx(tx); // nada 'A','B','...','AA',...
+          await tx.group.create({
+            data: {
+              tournamentId: id,
+              id: gid,
+              name: g.name,
+              teamIds: g.teamIds ?? [],
+            },
+          });
+        }
+      }
+
+      // 3) GRUPY — UPDATE (po globalnym id)
+      if (dto.groupsUpdate?.length) {
+        for (const g of dto.groupsUpdate) {
+          await tx.group.update({
+            where: { id: g.id },
+            data: {
+              ...(g.name !== undefined ? { name: g.name } : {}),
+              ...(g.teamIds !== undefined ? { teamIds: g.teamIds } : {}),
+            },
+          });
+        }
+      }
+
+      // 4) GRUPY — DELETE
+      if (dto.groupsDelete?.length) {
+        await tx.group.deleteMany({
+          where: { id: { in: dto.groupsDelete } },
+        });
+      }
+
+      // 5) STAGE’E — APPEND
+      if (dto.stagesAppend?.length) {
+        for (const s of dto.stagesAppend) {
+          const sid = await this.nextStageIdTx(tx, s.kind as $Enums.StageKind); // nada 'STAGE-GRP-1'/'STAGE-PO-1' itd.
+          await tx.stage.create({
+            data: {
+              tournamentId: id,
+              id: sid,
+              name: s.name,
+              kind: s.kind as $Enums.StageKind,
+              order: s.order,
+            },
+          });
+        }
+      }
+
+      // 6) STAGE’E — UPDATE (po globalnym id)
+      if (dto.stagesUpdate?.length) {
+        for (const s of dto.stagesUpdate) {
+          await tx.stage.update({
+            where: { id: s.id },
+            data: {
+              ...(s.name !== undefined ? { name: s.name } : {}),
+              ...(s.order !== undefined ? { order: s.order } : {}),
+            },
+          });
+        }
+      }
+
+      // 7) STAGE’E — DELETE
+      if (dto.stagesDelete?.length) {
+        await tx.stage.deleteMany({
+          where: { id: { in: dto.stagesDelete } },
+        });
+      }
+
+      // 8) Zwróć aktualny stan
+      const t = await tx.tournament.findUnique({
+        where: { id },
+        include: { groups: true, stages: true },
+      });
+      return toTournamentDto(t!);
     });
-
-    return toTournamentDto(updated);
   }
 
   async delete(id: string) {

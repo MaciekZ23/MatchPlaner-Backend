@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -7,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
 
 export const TournamentModeValues = [
@@ -63,6 +65,27 @@ export class TournamentDto {
   @ApiProperty({ type: [StageDto] }) stages!: StageDto[];
 }
 
+export class CreateGroupInput {
+  @ApiProperty() @IsString() name!: string;
+
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  teamIds!: string[];
+}
+
+export class CreateStageInput {
+  @ApiProperty() @IsString() name!: string;
+
+  @ApiProperty({ enum: StageKindValues })
+  @IsIn(StageKindValues)
+  kind!: StageKind;
+
+  @ApiProperty()
+  @IsNumber()
+  order!: number;
+}
+
 export class CreateTournamentDto {
   @ApiProperty() @IsString() @IsNotEmpty() name!: string;
 
@@ -88,15 +111,19 @@ export class CreateTournamentDto {
     | string
     | null;
 
-  @ApiPropertyOptional({ type: [GroupDto] })
+  @ApiPropertyOptional({ type: [CreateGroupInput] })
   @IsOptional()
   @IsArray()
-  groups?: GroupDto[];
+  @ValidateNested({ each: true })
+  @Type(() => CreateGroupInput)
+  groups?: CreateGroupInput[];
 
-  @ApiPropertyOptional({ type: [StageDto] })
+  @ApiPropertyOptional({ type: [CreateStageInput] })
   @IsOptional()
   @IsArray()
-  stages?: StageDto[];
+  @ValidateNested({ each: true })
+  @Type(() => CreateStageInput)
+  stages?: CreateStageInput[];
 }
 
 export class UpdateTournamentDto {
@@ -124,4 +151,47 @@ export class UpdateTournamentDto {
   @ApiPropertyOptional() @IsOptional() @IsString() venueImageUrl?:
     | string
     | null;
+
+  @ApiPropertyOptional({ type: [CreateGroupInput] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateGroupInput)
+  groupsAppend?: CreateGroupInput[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groupsDelete?: string[];
+
+  @ApiPropertyOptional({
+    type: Array,
+    description: 'Aktualizacje istniejących grup',
+  })
+  @IsOptional()
+  @IsArray()
+  groupsUpdate?: Array<{ id: string; name?: string; teamIds?: string[] }>;
+
+  // ---- operacje na stage’ach ----
+  @ApiPropertyOptional({ type: [CreateStageInput] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateStageInput)
+  stagesAppend?: CreateStageInput[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  stagesDelete?: string[];
+
+  @ApiPropertyOptional({
+    type: Array,
+    description: 'Aktualizacje istniejących stage’y',
+  })
+  @IsOptional()
+  @IsArray()
+  stagesUpdate?: Array<{ id: string; name?: string; order?: number }>;
 }
