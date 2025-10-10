@@ -270,16 +270,245 @@ export class MatchesService {
 
   async generateRoundRobin(
     tournamentId: string,
-    _dto: GenerateRoundRobinDto,
+    dto: GenerateRoundRobinDto,
   ): Promise<{ created: number }> {
     const t = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
     });
-    if (!t) {
-      throw new NotFoundException('Tournament not found');
+    if (!t) throw new NotFoundException('Tournament not found');
+
+    // 1) Stage grupowy
+    const stage = await this.prisma.stage.findFirst({
+      where: { tournamentId, kind: 'GROUP' },
+    });
+    if (!stage) throw new NotFoundException('Group stage not found');
+
+    // 2) Grupy (opcjonalny filtr)
+    const groups = await this.prisma.group.findMany({
+      where: {
+        tournamentId,
+        ...(dto.groupIds?.length ? { id: { in: dto.groupIds } } : {}),
+      },
+    });
+    if (!groups.length) return { created: 0 };
+
+    // 3) Opcjonalny cleanup meczów w tym stage (i ewent. tylko wskazanych grup)
+    if (dto.clearExisting) {
+      const toDelete = await this.prisma.match.findMany({
+        where: {
+          stageId: stage.id,
+          ...(dto.groupIds?.length ? { groupId: { in: dto.groupIds } } : {}),
+        },
+        select: { id: true },
+      });
+      const mids = toDelete.map((m) => m.id);
+      if (mids.length) {
+        await this.prisma.$transaction([
+          this.prisma.matchEvent.deleteMany({
+            where: { matchId: { in: mids } },
+          }),
+          this.prisma.match.deleteMany({ where: { id: { in: mids } } }),
+        ]);
+      }
     }
 
-    return { created: 0 };
+    // 4) Parametry kalendarza
+    const dayInterval = dto.dayInterval ?? 7;
+    const declaredTimes = (dto.matchTimes ?? []).filter(Boolean); // np. ['14:00','16:00']
+    const firstMatchTime = dto.firstMatchTime ?? '18:00'; // start jeśli używasz interwałów
+    const intervalMinutes = dto.matchIntervalMinutes ?? 120; // odstęp między meczami
+    const roundInSingleDay = dto.roundInSingleDay ?? true; // czy cała kolejka jednego dnia
+    const useInterval = !declaredTimes.length && !!dto.matchIntervalMinutes;
+
+    // 5) Helpery dat
+    const addDays = (ymd: string, days: number): string => {
+      const d = new Date(ymd);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+    const toZonedDate = (ymd: string, hhmm: string): Date => {
+      const [y, m, d] = ymd.split('-').map(Number);
+      const [hh, mm] = hhmm.split(':').map(Number);
+      // uproszczenie: zapis UTC na bazie daty + godziny
+      return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+    };
+
+    // 6) Berger – parowanie z obsługą BYE, doubleRound i shuffle
+    const buildRounds = (teamIds: string[]) => {
+      const teams = [...teamIds];
+      if (dto.shuffleTeams) {
+        for (let i = teams.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [teams[i], teams[j]] = [teams[j], teams[i]];
+        }
+      }
+      const hasBye = teams.length % 2 === 1;
+      if (hasBye) teams.push('__BYE__');
+
+      const n = teams.length;
+      const half = n / 2;
+      const rounds: Array<Array<[string, string]>> = [];
+      let arr = [...teams];
+
+      for (let r = 0; r < n - 1; r++) {
+        const pairings: Array<[string, string]> = [];
+        for (let i = 0; i < half; i++) {
+          const a = arr[i];
+          const b = arr[n - 1 - i];
+          const homeFirst = r % 2 === 0;
+          pairings.push(homeFirst ? [a, b] : [b, a]);
+        }
+        rounds.push(pairings);
+        // rotacja z "zatrzymanym" pierwszym
+        const fixed = arr[0];
+        arr = [fixed, ...arr.slice(-1), ...arr.slice(1, -1)];
+      }
+
+      if (dto.doubleRound) {
+        const second = rounds.map((round) =>
+          round.map(([h, a]) => [a, h] as [string, string]),
+        );
+        return rounds.concat(second);
+      }
+      return rounds;
+    };
+
+    // 7) GLOBALNY licznik indeksów per runda (naprawa @@unique(stageId, round, index))
+    const roundIndexCounters = new Map<number, number>(); // runda -> ostatni użyty index
+    const nextIndexForRound = (roundNo: number) => {
+      const cur = roundIndexCounters.get(roundNo) ?? 0;
+      const nxt = cur + 1;
+      roundIndexCounters.set(roundNo, nxt);
+      return nxt;
+    };
+
+    // 8) Generacja
+    let created = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const g of groups) {
+        const rounds = buildRounds(g.teamIds);
+        let day = dto.startDate; // YYYY-MM-DD
+
+        for (let r = 0; r < rounds.length; r++) {
+          const pairs = rounds[r];
+          const roundNo = r + 1;
+
+          if (declaredTimes.length) {
+            // ---- NOWA WERSJA: interwał dla każdego kolejnego meczu ----
+            let ymd = day;
+
+            // Godzina startu w danym dniu:
+            // - gdy runda ma być w 1 dniu -> bierzemy pierwszy slot jeśli jest, inaczej firstMatchTime
+            // - gdy może rozlewać się na kilka dni -> zaczynamy też od pierwszego slotu
+            const startHHMM = declaredTimes[0] ?? firstMatchTime;
+
+            // "aktualny" czas, który będziemy inkrementować o intervalMinutes
+            let current = toZonedDate(ymd, startHHMM);
+
+            // używane tylko, gdy runda może rozlewać się na wiele dni (roundInSingleDay === false)
+            let slotIdx = 0;
+
+            for (let i = 0; i < pairs.length; i++) {
+              const [home, away] = pairs[i];
+              if (home === '__BYE__' || away === '__BYE__') continue;
+
+              let date: Date;
+
+              if (roundInSingleDay) {
+                // cała runda w jednym dniu → każdy kolejny mecz to +interval
+                date = new Date(current);
+                current = new Date(
+                  current.getTime() + intervalMinutes * 60_000,
+                );
+              } else {
+                // runda może rozlewać się na kilka dni:
+                // użyj zdefiniowanych slotów; gdy zabraknie → następny dzień i znów od pierwszego slotu
+                if (slotIdx >= declaredTimes.length) {
+                  ymd = addDays(ymd, 1);
+                  slotIdx = 0;
+                  // odśwież także "current" na początek nowego dnia (żeby nie kumulować interwału z poprzedniego)
+                  current = toZonedDate(
+                    ymd,
+                    declaredTimes[0] ?? firstMatchTime,
+                  );
+                }
+                date = toZonedDate(ymd, declaredTimes[slotIdx++]);
+              }
+
+              const id = await this.nextMatchIdTx(tx);
+              await tx.match.create({
+                data: {
+                  id,
+                  stageId: stage.id,
+                  groupId: g.id,
+                  round: roundNo,
+                  index: nextIndexForRound(roundNo), // zostaw jak masz
+                  date,
+                  status: 'SCHEDULED',
+                  homeTeamId: home,
+                  awayTeamId: away,
+                },
+              });
+              created++;
+            }
+
+            // po kolejce – przeskocz o dayInterval (może być 0)
+            day = addDays(day, dayInterval);
+          } else if (useInterval) {
+            // Tryb: jeden start + odstęp minutowy (kolejka w jednym dniu)
+            let current = toZonedDate(day, firstMatchTime);
+
+            for (const [home, away] of pairs) {
+              if (home === '__BYE__' || away === '__BYE__') continue;
+
+              const id = await this.nextMatchIdTx(tx);
+              await tx.match.create({
+                data: {
+                  id,
+                  stageId: stage.id,
+                  groupId: g.id,
+                  round: roundNo,
+                  index: nextIndexForRound(roundNo), // <--- KLUCZOWE
+                  date: current,
+                  status: 'SCHEDULED',
+                  homeTeamId: home,
+                  awayTeamId: away,
+                },
+              });
+              created++;
+              current = new Date(current.getTime() + intervalMinutes * 60_000);
+            }
+
+            day = addDays(day, dayInterval);
+          } else {
+            // Fallback: jeden slot na dzień (firstMatchTime), cała kolejka jednego dnia
+            for (const [home, away] of pairs) {
+              if (home === '__BYE__' || away === '__BYE__') continue;
+
+              const id = await this.nextMatchIdTx(tx);
+              await tx.match.create({
+                data: {
+                  id,
+                  stageId: stage.id,
+                  groupId: g.id,
+                  round: roundNo,
+                  index: nextIndexForRound(roundNo), // <--- KLUCZOWE
+                  date: toZonedDate(day, firstMatchTime),
+                  status: 'SCHEDULED',
+                  homeTeamId: home,
+                  awayTeamId: away,
+                },
+              });
+              created++;
+            }
+            day = addDays(day, dayInterval);
+          }
+        }
+      }
+    });
+
+    return { created };
   }
 
   private async ensureStageExists(stageId: string): Promise<void> {

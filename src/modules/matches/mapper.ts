@@ -4,6 +4,7 @@ import { MatchDto, MatchEventDto } from './dto/match.dto';
 type MatchWithEvents = Match & { events?: MatchEvent[] };
 
 export const toEventDto = (e: MatchEvent): MatchEventDto => ({
+  id: e.id,
   minute: e.minute,
   type: e.type as MatchEventDto['type'],
   playerId: e.playerId,
@@ -16,6 +17,7 @@ export const toMatchDto = (m: MatchWithEvents): MatchDto => ({
   stageId: m.stageId,
   groupId: m.groupId ?? undefined,
   round: m.round ?? undefined,
+  index: m.index ?? undefined,
   date: m.date.toISOString(),
   status: m.status as MatchDto['status'],
   homeTeamId: m.homeTeamId ?? null,

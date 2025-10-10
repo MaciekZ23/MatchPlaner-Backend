@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class MatchEventDto {
+  @ApiProperty() id!: string;
   @ApiProperty() minute!: number;
   @ApiProperty({ enum: ['GOAL', 'ASSIST', 'OWN_GOAL', 'CARD'] })
   type!: 'GOAL' | 'ASSIST' | 'OWN_GOAL' | 'CARD';
