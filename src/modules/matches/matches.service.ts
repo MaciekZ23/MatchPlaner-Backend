@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { MatchDto } from './dto/match.dto';
 import { toMatchDto } from './mapper';
@@ -292,7 +296,21 @@ export class MatchesService {
     });
     if (!groups.length) return { created: 0 };
 
-    // 3) Opcjonalny cleanup meczów w tym stage (i ewent. tylko wskazanych grup)
+    // 2a) Walidacja: drużyna tylko w jednej grupie
+    const seen = new Map<string, string>(); // teamId -> groupId
+    for (const g of groups) {
+      for (const tid of g.teamIds) {
+        const prev = seen.get(tid);
+        if (prev && prev !== g.id) {
+          throw new BadRequestException(
+            `Team ${tid} jest już w grupie ${prev}, a także w ${g.id}. Jedna drużyna może należeć tylko do jednej grupy.`,
+          );
+        }
+        seen.set(tid, g.id);
+      }
+    }
+
+    // 3) Opcjonalny cleanup
     if (dto.clearExisting) {
       const toDelete = await this.prisma.match.findMany({
         where: {
@@ -314,11 +332,10 @@ export class MatchesService {
 
     // 4) Parametry kalendarza
     const dayInterval = dto.dayInterval ?? 7;
-    const declaredTimes = (dto.matchTimes ?? []).filter(Boolean); // np. ['14:00','16:00']
-    const firstMatchTime = dto.firstMatchTime ?? '18:00'; // start jeśli używasz interwałów
-    const intervalMinutes = dto.matchIntervalMinutes ?? 120; // odstęp między meczami
-    const roundInSingleDay = dto.roundInSingleDay ?? true; // czy cała kolejka jednego dnia
-    const useInterval = !declaredTimes.length && !!dto.matchIntervalMinutes;
+    const declaredTimes = (dto.matchTimes ?? []).filter(Boolean); // ['08:00','08:50',...]
+    const firstMatchTime = dto.firstMatchTime ?? '18:00';
+    const intervalMinutes = dto.matchIntervalMinutes ?? 120;
+    const roundInSingleDay = dto.roundInSingleDay ?? true;
 
     // 5) Helpery dat
     const addDays = (ymd: string, days: number): string => {
@@ -329,7 +346,7 @@ export class MatchesService {
     const toZonedDate = (ymd: string, hhmm: string): Date => {
       const [y, m, d] = ymd.split('-').map(Number);
       const [hh, mm] = hhmm.split(':').map(Number);
-      // uproszczenie: zapis UTC na bazie daty + godziny
+      // zapis jako UTC; jeśli chcesz TZ, zmień implementację
       return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
     };
 
@@ -359,7 +376,7 @@ export class MatchesService {
           pairings.push(homeFirst ? [a, b] : [b, a]);
         }
         rounds.push(pairings);
-        // rotacja z "zatrzymanym" pierwszym
+        // rotacja z „zatrzymanym” pierwszym
         const fixed = arr[0];
         arr = [fixed, ...arr.slice(-1), ...arr.slice(1, -1)];
       }
@@ -373,7 +390,7 @@ export class MatchesService {
       return rounds;
     };
 
-    // 7) GLOBALNY licznik indeksów per runda (naprawa @@unique(stageId, round, index))
+    // 7) GLOBALNY licznik indeksów per runda (dla @@unique(stageId, round, index))
     const roundIndexCounters = new Map<number, number>(); // runda -> ostatni użyty index
     const nextIndexForRound = (roundNo: number) => {
       const cur = roundIndexCounters.get(roundNo) ?? 0;
@@ -382,129 +399,199 @@ export class MatchesService {
       return nxt;
     };
 
+    // === GLOBALNY ALOKATOR SLOTÓW CZASOWYCH ===
+    type DateState = { slotIdx: number; lastSlotMins: number };
+    const toMin = (hhmm: string) => {
+      const [hh, mm] = hhmm.split(':').map(Number);
+      return hh * 60 + mm;
+    };
+    const toHHMM = (mins: number) => {
+      const h = Math.floor(mins / 60) % 24;
+      const m = mins % 60;
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(h)}:${pad(m)}`;
+    };
+
+    const cleanTimes = Array.from(new Set(declaredTimes))
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    const inferredStep =
+      cleanTimes.length >= 2 ? toMin(cleanTimes[1]) - toMin(cleanTimes[0]) : 90;
+
+    const step =
+      dto.matchIntervalMinutes && dto.matchIntervalMinutes > 0
+        ? dto.matchIntervalMinutes
+        : inferredStep;
+
+    const dateState = new Map<string, DateState>();
+    const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> set("HH:mm")
+
+    const markUsed = (ymd: string, hhmm: string) => {
+      if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
+      usedTimesPerDate.get(ymd)!.add(hhmm);
+    };
+    const isUsed = (ymd: string, hhmm: string) =>
+      usedTimesPerDate.get(ymd)?.has(hhmm) ?? false;
+
+    const allocateSlot = (
+      ymdStart: string,
+      allowNextDay: boolean,
+    ): { ymd: string; hhmm: string } => {
+      let ymd = ymdStart;
+      const intervalMode = cleanTimes.length === 0;
+
+      const ensureState = (d: string): DateState => {
+        if (!dateState.has(d)) {
+          dateState.set(d, {
+            slotIdx: 0,
+            // inicjujemy na pierwszym możliwym slocie
+            lastSlotMins: intervalMode
+              ? toMin(firstMatchTime)
+              : toMin(cleanTimes[0] ?? firstMatchTime),
+          });
+        }
+        return dateState.get(d)!;
+      };
+
+      // pomocnik: od minuty bazowej szukaj pierwszego wolnego slotu co 'stepMins'
+      const pickFree = (
+        ymdLocal: string,
+        baseMins: number,
+        stepMins: number,
+      ): string | null => {
+        let mins = baseMins;
+        while (mins < 24 * 60) {
+          const hhmm = toHHMM(mins);
+          if (!isUsed(ymdLocal, hhmm)) return hhmm;
+          mins += stepMins;
+        }
+        return null; // brak miejsca w tej dobie
+      };
+
+      for (;;) {
+        const st = ensureState(ymd);
+
+        if (!intervalMode) {
+          // 1) konsumuj podane godziny
+          while (st.slotIdx < cleanTimes.length) {
+            const cand = cleanTimes[st.slotIdx++];
+            if (!isUsed(ymd, cand)) {
+              markUsed(ymd, cand);
+              st.lastSlotMins = toMin(cand); // AKTUALIZUJEMY stan po przydziale
+              return { ymd, hhmm: cand };
+            }
+          }
+
+          // 2) brak godzin => dokładamy w TYM SAMYM DNIU co 'step'
+          const from = st.lastSlotMins + step;
+          const free = pickFree(ymd, from, step);
+          if (free) {
+            markUsed(ymd, free);
+            st.lastSlotMins = toMin(free);
+            return { ymd, hhmm: free };
+          }
+
+          // 3) doba pełna -> jeśli wolno, przejdź na kolejny dzień
+          if (allowNextDay) {
+            ymd = addDays(ymd, 1);
+            continue;
+          }
+
+          // 4) nie wolno – zawijamy w obrębie dnia (ciągle bez duplikatów)
+          let wrap = from % (24 * 60);
+          while (isUsed(ymd, toHHMM(wrap))) wrap = (wrap + step) % (24 * 60);
+          const hhmm = toHHMM(wrap);
+          markUsed(ymd, hhmm);
+          st.lastSlotMins = wrap;
+          return { ymd, hhmm };
+        } else {
+          // tryb interwałów
+          const from =
+            st.slotIdx === 0
+              ? toMin(firstMatchTime)
+              : st.lastSlotMins + intervalMinutes;
+          st.slotIdx++;
+
+          const free = pickFree(ymd, from, intervalMinutes);
+          if (free) {
+            markUsed(ymd, free);
+            st.lastSlotMins = toMin(free);
+            return { ymd, hhmm: free };
+          }
+
+          if (allowNextDay) {
+            ymd = addDays(ymd, 1);
+            continue;
+          }
+
+          // zawijamy w obrębie dnia
+          let wrap = from % (24 * 60);
+          while (isUsed(ymd, toHHMM(wrap)))
+            wrap = (wrap + intervalMinutes) % (24 * 60);
+          const hhmm = toHHMM(wrap);
+          markUsed(ymd, hhmm);
+          st.lastSlotMins = wrap;
+          return { ymd, hhmm };
+        }
+      }
+    };
+
     // 8) Generacja
     let created = 0;
 
     await this.prisma.$transaction(async (tx) => {
+      // 8a) Zbuduj rundy dla każdej grupy
+      const roundsByGroup = new Map<string, Array<Array<[string, string]>>>();
       for (const g of groups) {
-        const rounds = buildRounds(g.teamIds);
-        let day = dto.startDate; // YYYY-MM-DD
+        roundsByGroup.set(g.id, buildRounds(g.teamIds));
+      }
 
-        for (let r = 0; r < rounds.length; r++) {
-          const pairs = rounds[r];
-          const roundNo = r + 1;
+      // maksymalna liczba kolejek
+      const maxRounds = Math.max(
+        ...Array.from(roundsByGroup.values()).map((rs) => rs.length || 0),
+      );
 
-          if (declaredTimes.length) {
-            // ---- NOWA WERSJA: interwał dla każdego kolejnego meczu ----
-            let ymd = day;
+      // data startu dla kolejki 1
+      let roundDay = dto.startDate; // YYYY-MM-DD
 
-            // Godzina startu w danym dniu:
-            // - gdy runda ma być w 1 dniu -> bierzemy pierwszy slot jeśli jest, inaczej firstMatchTime
-            // - gdy może rozlewać się na kilka dni -> zaczynamy też od pierwszego slotu
-            const startHHMM = declaredTimes[0] ?? firstMatchTime;
+      for (let r = 0; r < maxRounds; r++) {
+        const roundNo = r + 1;
 
-            // "aktualny" czas, który będziemy inkrementować o intervalMinutes
-            let current = toZonedDate(ymd, startHHMM);
+        // w tej kolejce przejdź po wszystkich grupach (unikalne godziny globalnie)
+        for (const g of groups) {
+          const rs = roundsByGroup.get(g.id)!;
+          const pairs = rs[r] ?? [];
 
-            // używane tylko, gdy runda może rozlewać się na wiele dni (roundInSingleDay === false)
-            let slotIdx = 0;
+          for (const [home, away] of pairs) {
+            if (home === '__BYE__' || away === '__BYE__') continue;
 
-            for (let i = 0; i < pairs.length; i++) {
-              const [home, away] = pairs[i];
-              if (home === '__BYE__' || away === '__BYE__') continue;
+            const { ymd, hhmm } = allocateSlot(
+              roundDay,
+              /* allowNextDay */ !roundInSingleDay,
+            );
 
-              let date: Date;
-
-              if (roundInSingleDay) {
-                // cała runda w jednym dniu → każdy kolejny mecz to +interval
-                date = new Date(current);
-                current = new Date(
-                  current.getTime() + intervalMinutes * 60_000,
-                );
-              } else {
-                // runda może rozlewać się na kilka dni:
-                // użyj zdefiniowanych slotów; gdy zabraknie → następny dzień i znów od pierwszego slotu
-                if (slotIdx >= declaredTimes.length) {
-                  ymd = addDays(ymd, 1);
-                  slotIdx = 0;
-                  // odśwież także "current" na początek nowego dnia (żeby nie kumulować interwału z poprzedniego)
-                  current = toZonedDate(
-                    ymd,
-                    declaredTimes[0] ?? firstMatchTime,
-                  );
-                }
-                date = toZonedDate(ymd, declaredTimes[slotIdx++]);
-              }
-
-              const id = await this.nextMatchIdTx(tx);
-              await tx.match.create({
-                data: {
-                  id,
-                  stageId: stage.id,
-                  groupId: g.id,
-                  round: roundNo,
-                  index: nextIndexForRound(roundNo), // zostaw jak masz
-                  date,
-                  status: 'SCHEDULED',
-                  homeTeamId: home,
-                  awayTeamId: away,
-                },
-              });
-              created++;
-            }
-
-            // po kolejce – przeskocz o dayInterval (może być 0)
-            day = addDays(day, dayInterval);
-          } else if (useInterval) {
-            // Tryb: jeden start + odstęp minutowy (kolejka w jednym dniu)
-            let current = toZonedDate(day, firstMatchTime);
-
-            for (const [home, away] of pairs) {
-              if (home === '__BYE__' || away === '__BYE__') continue;
-
-              const id = await this.nextMatchIdTx(tx);
-              await tx.match.create({
-                data: {
-                  id,
-                  stageId: stage.id,
-                  groupId: g.id,
-                  round: roundNo,
-                  index: nextIndexForRound(roundNo), // <--- KLUCZOWE
-                  date: current,
-                  status: 'SCHEDULED',
-                  homeTeamId: home,
-                  awayTeamId: away,
-                },
-              });
-              created++;
-              current = new Date(current.getTime() + intervalMinutes * 60_000);
-            }
-
-            day = addDays(day, dayInterval);
-          } else {
-            // Fallback: jeden slot na dzień (firstMatchTime), cała kolejka jednego dnia
-            for (const [home, away] of pairs) {
-              if (home === '__BYE__' || away === '__BYE__') continue;
-
-              const id = await this.nextMatchIdTx(tx);
-              await tx.match.create({
-                data: {
-                  id,
-                  stageId: stage.id,
-                  groupId: g.id,
-                  round: roundNo,
-                  index: nextIndexForRound(roundNo), // <--- KLUCZOWE
-                  date: toZonedDate(day, firstMatchTime),
-                  status: 'SCHEDULED',
-                  homeTeamId: home,
-                  awayTeamId: away,
-                },
-              });
-              created++;
-            }
-            day = addDays(day, dayInterval);
+            const id = await this.nextMatchIdTx(tx);
+            await tx.match.create({
+              data: {
+                id,
+                stageId: stage.id,
+                groupId: g.id,
+                round: roundNo,
+                index: nextIndexForRound(roundNo),
+                date: toZonedDate(ymd, hhmm),
+                status: 'SCHEDULED',
+                homeTeamId: home,
+                awayTeamId: away,
+              },
+            });
+            created++;
           }
         }
+
+        // po całej kolejce skaczemy o dayInterval
+        roundDay = addDays(roundDay, dayInterval);
       }
     });
 
