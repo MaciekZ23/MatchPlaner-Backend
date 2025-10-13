@@ -7,9 +7,12 @@ export interface QualifiedTeam {
 }
 
 export interface SchedulingOptions {
-  startDateISO: string;
-  matchDurationMin: number;
-  gapBetweenMatchesMin: number;
-  matchesPerDay: number;
+  startDate: string;
+  matchTimes?: string[];
+  firstMatchTime?: string;
+  matchIntervalMinutes?: number;
+  dayInterval?: number;
+  roundInSingleDay?: boolean;
   withThirdPlace: boolean;
+  clearExisting?: boolean;
 }

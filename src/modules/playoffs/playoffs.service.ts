@@ -48,6 +48,23 @@ export class PlayoffsService {
       tournamentId,
       dto.stageName ?? 'Playoffs',
     );
+
+    if (dto.clearExisting) {
+      const toDelete = await this.prisma.match.findMany({
+        where: { stageId: stage.id },
+        select: { id: true },
+      });
+      const mids = toDelete.map((m) => m.id);
+      if (mids.length) {
+        await this.prisma.$transaction([
+          this.prisma.matchEvent.deleteMany({
+            where: { matchId: { in: mids } },
+          }),
+          this.prisma.match.deleteMany({ where: { id: { in: mids } } }),
+        ]);
+      }
+    }
+
     const firstRoundPairs = this.buildFirstRoundPairs(
       groups.map((g) => g.id),
       qualified,
@@ -59,12 +76,16 @@ export class PlayoffsService {
     }
 
     const options: SchedulingOptions = {
-      startDateISO: dto.startDateISO,
-      matchDurationMin: dto.matchDurationMin,
-      gapBetweenMatchesMin: dto.gapBetweenMatchesMin,
-      matchesPerDay: dto.matchesPerDay,
-      withThirdPlace: dto.withThirdPlace,
+      startDate: dto.startDate,
+      matchTimes: dto.matchTimes,
+      firstMatchTime: dto.firstMatchTime,
+      matchIntervalMinutes: dto.matchIntervalMinutes,
+      dayInterval: dto.dayInterval ?? 0,
+      roundInSingleDay: dto.roundInSingleDay ?? true,
+      withThirdPlace: dto.withThirdPlace ?? true,
+      clearExisting: dto.clearExisting ?? false,
     };
+
     const created = await this.createBracketTree(
       stage.id,
       firstRoundPairs,
@@ -143,73 +164,258 @@ export class PlayoffsService {
     return pairs;
   }
 
-  private addMinutesISO(baseISO: string, plusMin: number): string {
-    const d = new Date(baseISO);
-    d.setMinutes(d.getMinutes() + plusMin);
-    return d.toISOString();
+  // NEW: helpery daty/godziny (jak w RR)
+  private addDays(ymd: string, days: number): string {
+    const d = new Date(ymd);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
   }
 
-  // Wyliczanie daty/godziny dla kolejnego slotu
-  private makeSlotter(opts: SchedulingOptions) {
-    const step = opts.matchDurationMin + opts.gapBetweenMatchesMin;
+  private toZonedDate(ymd: string, hhmm: string): Date {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const [hh, mm] = hhmm.split(':').map(Number);
+    // jeśli chcesz TZ -> dostosuj
+    return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+  }
 
-    return (slotIndex: number) => {
-      const day = Math.floor(slotIndex / opts.matchesPerDay);
-      const offset = slotIndex % opts.matchesPerDay;
+  // NEW: alokator slotów czasowych – wersja bez allocateWrapper
+  private makeAllocator(opts: SchedulingOptions) {
+    const dayInterval = opts.dayInterval ?? 0;
+    const roundInSingleDay = opts.roundInSingleDay ?? true;
 
-      const baseForDay = this.addMinutesISO(
-        opts.startDateISO,
-        day * opts.matchesPerDay * step,
-      );
-      return this.addMinutesISO(baseForDay, offset * step);
+    const toMin = (hhmm: string) => {
+      const [hh, mm] = hhmm.split(':').map(Number);
+      return hh * 60 + mm;
+    };
+    const toHHMM = (mins: number) => {
+      const h = Math.floor(mins / 60) % 24;
+      const m = mins % 60;
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(h)}:${pad(m)}`;
+    };
+
+    const declared = Array.from(new Set(opts.matchTimes ?? []))
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    const intervalMode = declared.length === 0;
+    const first = opts.firstMatchTime ?? '18:00';
+    const intervalMinutes = opts.matchIntervalMinutes ?? 120;
+
+    // stan per data
+    type DateState = { slotIdx: number; lastSlotMins: number };
+    const dateState = new Map<string, DateState>();
+    const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> Set('HH:mm')
+
+    const markUsed = (ymd: string, hhmm: string) => {
+      if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
+      usedTimesPerDate.get(ymd)!.add(hhmm);
+    };
+    const isUsed = (ymd: string, hhmm: string) =>
+      usedTimesPerDate.get(ymd)?.has(hhmm) ?? false;
+
+    const ensureState = (d: string): DateState => {
+      if (!dateState.has(d)) {
+        dateState.set(d, {
+          slotIdx: 0,
+          lastSlotMins: intervalMode
+            ? toMin(first)
+            : toMin(declared[0] ?? first),
+        });
+      }
+      return dateState.get(d)!;
+    };
+
+    const pickFree = (
+      ymdLocal: string,
+      baseMins: number,
+      stepMins: number,
+    ): string | null => {
+      let mins = baseMins;
+      while (mins < 24 * 60) {
+        const hhmm = toHHMM(mins);
+        if (!isUsed(ymdLocal, hhmm)) return hhmm;
+        mins += stepMins;
+      }
+      return null;
+    };
+
+    // narzędzia do startowania od "początku dnia"
+    const firstSlotOfDay = (ymdLocal: string): string => {
+      if (!intervalMode) {
+        // najpierw spróbuj pierwszej z listy; jak zajęta, weź kolejną o krok=step
+        const step =
+          opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
+            ? opts.matchIntervalMinutes
+            : declared.length >= 2
+              ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
+              : intervalMinutes;
+        const base = toMin(declared[0] ?? first);
+        return pickFree(ymdLocal, base, step) ?? declared[0] ?? first;
+      } else {
+        const base = toMin(first);
+        return pickFree(ymdLocal, base, intervalMinutes) ?? first;
+      }
+    };
+
+    // sterowanie datą rundy
+    let roundDay = opts.startDate; // YYYY-MM-DD
+
+    return {
+      startOfRound: (ymd: string) => {
+        roundDay = ymd;
+      },
+      nextRoundDay: (ymd: string) => this.addDays(ymd, dayInterval),
+
+      allocate: (): { ymd: string; hhmm: string } => {
+        let ymd = roundDay;
+        let st = ensureState(ymd);
+
+        if (!intervalMode) {
+          // tryb z listą godzin
+          while (st.slotIdx < declared.length) {
+            const cand = declared[st.slotIdx++];
+            if (!isUsed(ymd, cand)) {
+              markUsed(ymd, cand);
+              st.lastSlotMins = toMin(cand);
+              return { ymd, hhmm: cand };
+            }
+          }
+
+          // brak godzin – spróbuj dołożyć interwałem w tym dniu
+          const step =
+            opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
+              ? opts.matchIntervalMinutes
+              : declared.length >= 2
+                ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
+                : intervalMinutes;
+
+          const from = st.lastSlotMins + step;
+          const free = pickFree(ymd, from, step);
+          if (free) {
+            markUsed(ymd, free);
+            st.lastSlotMins = toMin(free);
+            return { ymd, hhmm: free };
+          }
+
+          if (!roundInSingleDay) {
+            // przelew na kolejny dzień – zacznij od pierwszego slotu dnia
+            roundDay = this.addDays(roundDay, 1);
+            ymd = roundDay;
+            st = ensureState(ymd);
+            const firstFree = firstSlotOfDay(ymd);
+            markUsed(ymd, firstFree);
+            st.lastSlotMins = toMin(firstFree);
+            st.slotIdx = Math.max(st.slotIdx, intervalMode ? 1 : 1); // „coś” już zużyliśmy
+            return { ymd, hhmm: firstFree };
+          }
+
+          // wymuś w obrębie dnia (zawijanie)
+          let wrap = from % (24 * 60);
+          while (isUsed(ymd, toHHMM(wrap))) wrap = (wrap + step) % (24 * 60);
+          const hhmm = toHHMM(wrap);
+          markUsed(ymd, hhmm);
+          st.lastSlotMins = wrap;
+          return { ymd, hhmm };
+        } else {
+          // tryb interwałów
+          const from =
+            st.slotIdx === 0 ? toMin(first) : st.lastSlotMins + intervalMinutes;
+          st.slotIdx++;
+          const free = pickFree(ymd, from, intervalMinutes);
+          if (free) {
+            markUsed(ymd, free);
+            st.lastSlotMins = toMin(free);
+            return { ymd, hhmm: free };
+          }
+
+          if (!roundInSingleDay) {
+            roundDay = this.addDays(roundDay, 1);
+            ymd = roundDay;
+            st = ensureState(ymd);
+            const firstFree = firstSlotOfDay(ymd);
+            markUsed(ymd, firstFree);
+            st.lastSlotMins = toMin(firstFree);
+            st.slotIdx = Math.max(st.slotIdx, 1);
+            return { ymd, hhmm: firstFree };
+          }
+
+          // zawijanie w obrębie dnia
+          let wrap = from % (24 * 60);
+          while (isUsed(ymd, toHHMM(wrap)))
+            wrap = (wrap + intervalMinutes) % (24 * 60);
+          const hhmm = toHHMM(wrap);
+          markUsed(ymd, hhmm);
+          st.lastSlotMins = wrap;
+          return { ymd, hhmm };
+        }
+      },
     };
   }
 
-  // Tworzenie pełnej drabinki
   private async createBracketTree(
     stageId: string,
     firstPairs: Pair<QualifiedTeam>[],
     opts: SchedulingOptions,
   ) {
-    const slotAt = this.makeSlotter(opts);
+    const allocator = this.makeAllocator(opts);
+
     const teamsCount = firstPairs.length * 2;
     const totalRounds = Math.ceil(Math.log2(teamsCount)); // 16→4, 8→3, 4→2
     const firstRoundNo = totalRounds;
 
-    // Pierwsza runda
+    // licznik indeksów per runda (dla @@unique(stageId, round, index))
+    const roundIndexCounters = new Map<number, number>();
+    const nextIndexForRound = (roundNo: number) => {
+      const cur = roundIndexCounters.get(roundNo) ?? 0;
+      const nxt = cur + 1;
+      roundIndexCounters.set(roundNo, nxt);
+      return nxt;
+    };
+
+    // --- R1 (konkretne zespoły)
+    let currentRoundDay = opts.startDate;
+    allocator.startOfRound(currentRoundDay);
+
     const r1 = await Promise.all(
-      firstPairs.map((p, idx) =>
-        this.prisma.match.create({
+      firstPairs.map(async (p) => {
+        const { ymd, hhmm } = allocator.allocate();
+        return this.prisma.match.create({
           data: {
             stageId,
             round: firstRoundNo,
-            index: idx + 1,
-            date: slotAt(idx),
+            index: nextIndexForRound(firstRoundNo),
+            date: this.toZonedDate(ymd, hhmm),
             status: 'SCHEDULED',
             homeTeamId: p.home.teamId,
             awayTeamId: p.away.teamId,
             homeSourceKind: 'TEAM',
             awaySourceKind: 'TEAM',
           },
-        }),
-      ),
+        });
+      }),
     );
 
-    // Kolejne rundy
+    // --- Kolejne rundy (WINNER z poprzednich)
     let prev = r1;
-    let slotCursor = r1.length;
     for (let r = firstRoundNo - 1; r >= 1; r--) {
+      // skok dnia dla tej rundy (po całej poprzedniej rundzie)
+      currentRoundDay = allocator.nextRoundDay(currentRoundDay);
+      allocator.startOfRound(currentRoundDay);
+
       const next: typeof prev = [];
       for (let i = 0; i < prev.length; i += 2) {
         const left = prev[i];
-        const right = prev[i + 1];
+        const right = prev[i + 1] ?? null;
 
+        const { ymd, hhmm } = allocator.allocate();
         const m = await this.prisma.match.create({
           data: {
             stageId,
             round: r,
-            index: Math.floor(i / 2) + 1,
-            date: slotAt(slotCursor++),
+            index: nextIndexForRound(r),
+            date: this.toZonedDate(ymd, hhmm),
             status: 'SCHEDULED',
             homeSourceKind: 'WINNER',
             homeSourceRef: left.id,
@@ -222,19 +428,24 @@ export class PlayoffsService {
       prev = next;
     }
 
-    // Mecz o 3. miejsce
+    // --- Mecz o 3. miejsce (po półfinałach = round 2)
     if (opts.withThirdPlace) {
+      // kolejny „dzień rundy” względem finałów
+      currentRoundDay = allocator.nextRoundDay(currentRoundDay);
+      allocator.startOfRound(currentRoundDay);
+
       const semis = await this.prisma.match.findMany({
         where: { stageId, round: 2 },
         orderBy: { index: 'asc' },
       });
       if (semis.length === 2) {
+        const { ymd, hhmm } = allocator.allocate();
         await this.prisma.match.create({
           data: {
             stageId,
-            round: 1,
+            round: 1, // razem z finałem w „rundzie 1” ale inny index
             index: 2,
-            date: slotAt(slotCursor++),
+            date: this.toZonedDate(ymd, hhmm),
             status: 'SCHEDULED',
             homeSourceKind: 'LOSER',
             homeSourceRef: semis[0].id,
@@ -244,6 +455,7 @@ export class PlayoffsService {
         });
       }
     }
+
     return this.prisma.match.findMany({
       where: { stageId },
       orderBy: [{ round: 'desc' }, { index: 'asc' }],
