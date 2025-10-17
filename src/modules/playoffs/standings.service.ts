@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
 
+/** Surowy widok meczu potrzebny do obliczeń tabeli */
 type RawMatch = {
   homeTeamId: string | null;
   awayTeamId: string | null;
@@ -9,6 +10,7 @@ type RawMatch = {
   status: string;
 };
 
+/** Pojedynczy wiersz tabeli roboczej */
 interface Row {
   teamId: string;
   pts: number;
@@ -23,7 +25,7 @@ interface Row {
 export class StandingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Top2 z każdej grupy wg reguł: pkt → H2H pkt → H2H GD → GD → GF → W → AW */
+  /** Zwraca Top2 z każdej grupy */
   async topTwoPerGroup(
     tournamentId: string,
   ): Promise<Array<{ teamId: string; group: string; place: 1 | 2 }>> {
@@ -64,17 +66,18 @@ export class StandingsService {
         });
       }
 
+      // tylko mecze zakończone i z oboma zespołami + wynikiem
       const finished = g.matches.filter((m) => {
         return (
           m.status === 'FINISHED' &&
-          m.homeTeamId &&
-          m.awayTeamId &&
+          !!m.homeTeamId &&
+          !!m.awayTeamId &&
           m.homeScore != null &&
           m.awayScore != null
         );
       }) as RawMatch[];
 
-      // zliczanie
+      // agregacja statystyk
       for (const m of finished) {
         const home = rows.get(m.homeTeamId!)!;
         const away = rows.get(m.awayTeamId!)!;
@@ -93,7 +96,7 @@ export class StandingsService {
         } else if (m.homeScore! < m.awayScore!) {
           away.pts += 3;
           away.wins += 1;
-          away.awayWins += 1; // zwycięstwo gości
+          away.awayWins += 1;
         } else {
           home.pts += 1;
           away.pts += 1;
@@ -101,72 +104,76 @@ export class StandingsService {
       }
 
       // sort bazowy po punktach
-      let table = Array.from(rows.values()).sort((a, b) => b.pts - a.pts);
+      const table = Array.from(rows.values());
+      table.sort((a, b) => b.pts - a.pts);
 
       // rozwiązywanie remisów w klastrach
       let i = 0;
+      const resolved: Row[] = [];
       while (i < table.length) {
         let j = i + 1;
         while (j < table.length && table[j].pts === table[i].pts) {
           j++;
         }
 
-        if (j - i > 1) {
-          const cluster = table.slice(i, j);
-          const clusterIds = new Set(cluster.map((r) => r.teamId));
-          const mini = this.buildMiniTable(clusterIds, finished);
+        const cluster = table.slice(i, j);
+        if (cluster.length === 1) {
+          resolved.push(cluster[0]);
+        } else if (cluster.length === 2) {
+          cluster.sort((A, B) => {
+            return this.compareTwo(A, B, finished);
+          });
+          resolved.push(...cluster);
+        } else {
+          const ids = new Set(cluster.map((r) => r.teamId));
+          const mini = this.buildMiniTable(ids, finished);
 
-          cluster.sort((a, b) => {
-            // 1) punkty H2H
-            if (mini.get(b.teamId)!.pts !== mini.get(a.teamId)!.pts) {
-              return mini.get(b.teamId)!.pts - mini.get(a.teamId)!.pts;
+          cluster.sort((A, B) => {
+            if (mini.get(B.teamId)!.pts !== mini.get(A.teamId)!.pts) {
+              return mini.get(B.teamId)!.pts - mini.get(A.teamId)!.pts;
             }
-            // 2) bilans H2H
-            if (mini.get(b.teamId)!.gd !== mini.get(a.teamId)!.gd) {
-              return mini.get(b.teamId)!.gd - mini.get(a.teamId)!.gd;
+
+            if (mini.get(B.teamId)!.gd !== mini.get(A.teamId)!.gd) {
+              return mini.get(B.teamId)!.gd - mini.get(A.teamId)!.gd;
             }
-            // 3) bilans ogólny
-            if (b.gd !== a.gd) {
-              return b.gd - a.gd;
+
+            if (B.gd !== A.gd) {
+              return B.gd - A.gd;
             }
-            // 4) gole ogólnie
-            if (b.gf !== a.gf) {
-              return b.gf - a.gf;
+
+            if (B.gf !== A.gf) {
+              return B.gf - A.gf;
             }
-            // 5) zwycięstwa ogółem
-            if (b.wins !== a.wins) {
-              return b.wins - a.wins;
+
+            if (B.wins !== A.wins) {
+              return B.wins - A.wins;
             }
-            // 6) zwycięstwa na wyjeździe
-            if (b.awayWins !== a.awayWins) {
-              return b.awayWins - a.awayWins;
+
+            if (B.awayWins !== A.awayWins) {
+              return B.awayWins - A.awayWins;
             }
-            // stabilne domknięcie
-            return a.teamId.localeCompare(b.teamId);
+
+            return A.teamId.localeCompare(B.teamId);
           });
 
-          table.splice(i, j - i, ...cluster);
+          resolved.push(...cluster);
         }
 
         i = j;
       }
 
-      // dodatkowo – gdy w klastrze 2 drużyn wciąż remis:
-      // porównanie 1:1 (H2H) przed globalnymi 3→6 (dla pewności)
-      table = table.sort((a, b) => this.comparePair(a, b, finished));
-
-      if (table[0]) {
-        qualified.push({ teamId: table[0].teamId, group: g.id, place: 1 });
+      if (resolved[0]) {
+        qualified.push({ teamId: resolved[0].teamId, group: g.id, place: 1 });
       }
-      if (table[1]) {
-        qualified.push({ teamId: table[1].teamId, group: g.id, place: 2 });
+      if (resolved[1]) {
+        qualified.push({ teamId: resolved[1].teamId, group: g.id, place: 2 });
       }
     }
 
     return qualified;
   }
 
-  /** Mini-tabela tylko w gronie wskazanych ekip: liczy pkt i GD H2H */
+  /**Metoda tworząca mini-tabelę (tylko w gronie wskazanych zespołów) */
   private buildMiniTable(
     teams: Set<string>,
     matches: RawMatch[],
@@ -175,6 +182,7 @@ export class StandingsService {
       string,
       { pts: number; gd: number; gf: number; ga: number }
     >();
+
     for (const id of teams) {
       res.set(id, { pts: 0, gd: 0, gf: 0, ga: 0 });
     }
@@ -183,6 +191,7 @@ export class StandingsService {
       if (!teams.has(m.homeTeamId!) || !teams.has(m.awayTeamId!)) {
         continue;
       }
+
       const A = res.get(m.homeTeamId!)!;
       const B = res.get(m.awayTeamId!)!;
 
@@ -211,26 +220,28 @@ export class StandingsService {
     return out;
   }
 
-  /** Porównanie dwóch drużyn wg pełnych zasad (używane jako domknięcie) */
-  private comparePair(a: Row, b: Row, matches: RawMatch[]): number {
+  /** Porównanie dwóch drużyn wg pełnych zasad */
+  private compareTwo(a: Row, b: Row, matches: RawMatch[]): number {
     if (a.pts !== b.pts) {
       return b.pts - a.pts;
     }
 
-    // H2H tylko między a–b
-    let aPts = 0,
-      bPts = 0,
-      aGD = 0,
-      bGD = 0;
+    let aPts = 0;
+    let bPts = 0;
+    let aGD = 0;
+    let bGD = 0;
+
     for (const m of matches) {
       const isAB = m.homeTeamId === a.teamId && m.awayTeamId === b.teamId;
       const isBA = m.homeTeamId === b.teamId && m.awayTeamId === a.teamId;
+
       if (!isAB && !isBA) {
         continue;
       }
 
       const h = m.homeScore!;
       const aw = m.awayScore!;
+
       if (isAB) {
         if (h > aw) {
           aPts += 3;

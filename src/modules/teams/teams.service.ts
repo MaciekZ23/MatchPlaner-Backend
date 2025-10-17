@@ -83,8 +83,8 @@ export class TeamsService {
       return tx.team.create({
         data: {
           id: newId,
-          name: body.name,
-          logo: body.logo ?? null,
+          name: body.name.trim(),
+          logo: body.logo && body.logo.trim() ? body.logo.trim() : null,
           tournamentId,
         },
         include: { players: { select: { id: true } } },
@@ -162,7 +162,8 @@ export class TeamsService {
       data.name = body.name;
     }
     if (body.logo !== undefined) {
-      data.logo = body.logo ?? null;
+      const val = typeof body.logo === 'string' ? body.logo.trim() : body.logo;
+      data.logo = val ? val : null;
     }
 
     const updated = await this.prisma.team.update({

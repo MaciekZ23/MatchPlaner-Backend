@@ -122,25 +122,23 @@ export class PlayoffsService {
     groups: string[],
     q: QualifiedTeam[],
   ): Pair<QualifiedTeam>[] {
-    const pairs: Pair<QualifiedTeam>[] = [];
+    const left: Pair<QualifiedTeam>[] = [];
+    const right: Pair<QualifiedTeam>[] = [];
 
     if (groups.length === 0) {
-      return pairs;
+      return [];
     }
 
     if (groups.length === 1) {
       const g = groups[0];
-      const first = q.find((t) => t.group === g && t.place === 1) ?? null;
-      const second = q.find((t) => t.group === g && t.place === 2) ?? null;
-      if (first && second) {
-        pairs.push({ home: first, away: second });
-      }
-      return pairs;
+      const first = q.find((t) => t.group === g && t.place === 1);
+      const second = q.find((t) => t.group === g && t.place === 2);
+      return first && second ? [{ home: first, away: second }] : [];
     }
 
     if (groups.length % 2 !== 0) {
       throw new BadRequestException(
-        'Liczba grup musi być parzysta, aby zbudować drabinkę bez BYE (albo dodaj logikę BYE/best thirds).',
+        'Liczba grup musi być parzysta, aby zbudować drabinkę bez BYE.',
       );
     }
 
@@ -148,20 +146,21 @@ export class PlayoffsService {
       const g1 = groups[i];
       const g2 = groups[i + 1];
 
-      const g1_1 = q.find((t) => t.group === g1 && t.place === 1) ?? null;
-      const g1_2 = q.find((t) => t.group === g1 && t.place === 2) ?? null;
-      const g2_1 = q.find((t) => t.group === g2 && t.place === 1) ?? null;
-      const g2_2 = q.find((t) => t.group === g2 && t.place === 2) ?? null;
+      const g1_1 = q.find((t) => t.group === g1 && t.place === 1);
+      const g1_2 = q.find((t) => t.group === g1 && t.place === 2);
+      const g2_1 = q.find((t) => t.group === g2 && t.place === 1);
+      const g2_2 = q.find((t) => t.group === g2 && t.place === 2);
 
       if (g1_1 && g2_2) {
-        pairs.push({ home: g1_1, away: g2_2 });
+        left.push({ home: g1_1, away: g2_2 });
       }
+
       if (g2_1 && g1_2) {
-        pairs.push({ home: g2_1, away: g1_2 });
+        right.push({ home: g2_1, away: g1_2 });
       }
     }
 
-    return pairs;
+    return [...left, ...right];
   }
 
   // NEW: helpery daty/godziny (jak w RR)
@@ -174,8 +173,8 @@ export class PlayoffsService {
   private toZonedDate(ymd: string, hhmm: string): Date {
     const [y, m, d] = ymd.split('-').map(Number);
     const [hh, mm] = hhmm.split(':').map(Number);
-    // jeśli chcesz TZ -> dostosuj
-    return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+    // data w CZASIE LOKALNYM serwera (nie UTC)
+    return new Date(y, m - 1, d, hh, mm, 0, 0);
   }
 
   // NEW: alokator slotów czasowych – wersja bez allocateWrapper
@@ -400,60 +399,97 @@ export class PlayoffsService {
     // --- Kolejne rundy (WINNER z poprzednich)
     let prev = r1;
     for (let r = firstRoundNo - 1; r >= 1; r--) {
-      // skok dnia dla tej rundy (po całej poprzedniej rundzie)
       currentRoundDay = allocator.nextRoundDay(currentRoundDay);
       allocator.startOfRound(currentRoundDay);
 
       const next: typeof prev = [];
-      for (let i = 0; i < prev.length; i += 2) {
-        const left = prev[i];
-        const right = prev[i + 1] ?? null;
 
-        const { ymd, hhmm } = allocator.allocate();
-        const m = await this.prisma.match.create({
-          data: {
-            stageId,
-            round: r,
-            index: nextIndexForRound(r),
-            date: this.toZonedDate(ymd, hhmm),
-            status: 'SCHEDULED',
-            homeSourceKind: 'WINNER',
-            homeSourceRef: left.id,
-            awaySourceKind: 'WINNER',
-            awaySourceRef: right?.id ?? null,
-          },
-        });
-        next.push(m);
+      if (r === 1) {
+        const left = prev[0];
+        const right = prev[1] ?? null;
+
+        if (opts.withThirdPlace && prev.length === 2) {
+          const a = allocator.allocate();
+          const b = allocator.allocate();
+
+          const toKey = (s: { ymd: string; hhmm: string }) =>
+            `${s.ymd}T${s.hhmm}`;
+          const [early, late] = toKey(a) <= toKey(b) ? [a, b] : [b, a];
+
+          // FINAŁ ─ PÓŹNIEJSZY slot, index: 1  ✅
+          const final = await this.prisma.match.create({
+            data: {
+              stageId,
+              round: 1,
+              index: 1,
+              date: this.toZonedDate(late.ymd, late.hhmm),
+              status: 'SCHEDULED',
+              homeSourceKind: 'WINNER',
+              homeSourceRef: left.id,
+              awaySourceKind: 'WINNER',
+              awaySourceRef: right?.id ?? null,
+            },
+          });
+
+          // 3. MIEJSCE ─ WCZEŚNIEJSZY slot, index: 2  ✅
+          await this.prisma.match.create({
+            data: {
+              stageId,
+              round: 1,
+              index: 2,
+              date: this.toZonedDate(early.ymd, early.hhmm),
+              status: 'SCHEDULED',
+              homeSourceKind: 'LOSER',
+              homeSourceRef: prev[0].id,
+              awaySourceKind: 'LOSER',
+              awaySourceRef: prev[1].id,
+            },
+          });
+
+          next.push(final);
+        } else {
+          // bez meczu o 3. miejsce – bez zmian
+          const slotFinal = allocator.allocate();
+          const final = await this.prisma.match.create({
+            data: {
+              stageId,
+              round: 1,
+              index: 1,
+              date: this.toZonedDate(slotFinal.ymd, slotFinal.hhmm),
+              status: 'SCHEDULED',
+              homeSourceKind: 'WINNER',
+              homeSourceRef: left.id,
+              awaySourceKind: 'WINNER',
+              awaySourceRef: right?.id ?? null,
+            },
+          });
+          next.push(final);
+        }
+      } else {
+        // ...bez zmian dla innych rund (SF/QF)
+        for (let i = 0; i < prev.length; i += 2) {
+          const left = prev[i];
+          const right = prev[i + 1] ?? null;
+
+          const { ymd, hhmm } = allocator.allocate();
+          const m = await this.prisma.match.create({
+            data: {
+              stageId,
+              round: r,
+              index: nextIndexForRound(r),
+              date: this.toZonedDate(ymd, hhmm),
+              status: 'SCHEDULED',
+              homeSourceKind: 'WINNER',
+              homeSourceRef: left.id,
+              awaySourceKind: 'WINNER',
+              awaySourceRef: right?.id ?? null,
+            },
+          });
+          next.push(m);
+        }
       }
+
       prev = next;
-    }
-
-    // --- Mecz o 3. miejsce (po półfinałach = round 2)
-    if (opts.withThirdPlace) {
-      // kolejny „dzień rundy” względem finałów
-      currentRoundDay = allocator.nextRoundDay(currentRoundDay);
-      allocator.startOfRound(currentRoundDay);
-
-      const semis = await this.prisma.match.findMany({
-        where: { stageId, round: 2 },
-        orderBy: { index: 'asc' },
-      });
-      if (semis.length === 2) {
-        const { ymd, hhmm } = allocator.allocate();
-        await this.prisma.match.create({
-          data: {
-            stageId,
-            round: 1, // razem z finałem w „rundzie 1” ale inny index
-            index: 2,
-            date: this.toZonedDate(ymd, hhmm),
-            status: 'SCHEDULED',
-            homeSourceKind: 'LOSER',
-            homeSourceRef: semis[0].id,
-            awaySourceKind: 'LOSER',
-            awaySourceRef: semis[1].id,
-          },
-        });
-      }
     }
 
     return this.prisma.match.findMany({

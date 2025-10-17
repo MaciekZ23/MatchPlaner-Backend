@@ -11,5 +11,5 @@ export class CreateTeamDto {
   @IsOptional()
   @IsString()
   @MaxLength(300)
-  logo?: string;
+  logo?: string | null;
 }

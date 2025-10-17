@@ -10,10 +10,29 @@ import { CreateMatchDto } from './dto/create-match.dto';
 import { GenerateRoundRobinDto } from './dto/generate-round-robin.dto';
 import { UpdateMatchDto } from './dto/update-match.dto';
 import { Prisma, MatchEventType, CardKind } from '@prisma/client';
+import { PlayoffsService } from '../playoffs/playoffs.service';
 
 @Injectable()
 export class MatchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly playoffs: PlayoffsService,
+  ) {}
+
+  private fromLocalISO(input: string): Date {
+    if (/([zZ]|[+\-]\d{2}:\d{2})$/.test(input)) return new Date(input);
+
+    const [datePart, timePart = '00:00'] = input.split('T');
+    const [y, m, d] = datePart.split('-').map(Number);
+    const [hh, mm = 0, ss = 0] = timePart.split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm, ss, 0);
+  }
+
+  private toLocalDate(ymd: string, hhmm: string): Date {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const [hh, mm] = hhmm.split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm, 0, 0);
+  }
 
   private async nextMatchIdTx(tx: Prisma.TransactionClient): Promise<string> {
     const existing = await tx.idCounter.findUnique({ where: { key: 'match' } });
@@ -72,7 +91,7 @@ export class MatchesService {
           groupId: dto.groupId ?? null,
           round: dto.round ?? null,
           index: dto.index ?? null,
-          date: new Date(dto.date),
+          date: this.fromLocalISO(dto.date),
           status: (dto.status ?? 'SCHEDULED') as any,
           homeTeamId: dto.homeTeamId ?? null,
           awayTeamId: dto.awayTeamId ?? null,
@@ -136,9 +155,14 @@ export class MatchesService {
       if (dto.date !== undefined) {
         data.date = new Date(dto.date);
       }
+      if (dto.date !== undefined) {
+        data.date = this.fromLocalISO(dto.date);
+      }
+
       if (dto.status !== undefined) {
         data.status = dto.status as any;
       }
+
       if (dto.homeTeamId !== undefined) {
         data.homeTeam = dto.homeTeamId
           ? { connect: { id: dto.homeTeamId } }
@@ -208,6 +232,8 @@ export class MatchesService {
         include: { events: true },
       });
     });
+
+    await this.playoffs.propagateMatchOutcome(id);
 
     return toMatchDto(result!);
   }
@@ -344,10 +370,7 @@ export class MatchesService {
       return d.toISOString().slice(0, 10);
     };
     const toZonedDate = (ymd: string, hhmm: string): Date => {
-      const [y, m, d] = ymd.split('-').map(Number);
-      const [hh, mm] = hhmm.split(':').map(Number);
-      // zapis jako UTC; jeśli chcesz TZ, zmień implementację
-      return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+      return this.toLocalDate(ymd, hhmm);
     };
 
     // 6) Berger – parowanie z obsługą BYE, doubleRound i shuffle

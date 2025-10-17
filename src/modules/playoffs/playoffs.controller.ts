@@ -20,6 +20,7 @@ export class PlayoffsController {
     }
     const matches = await this.prisma.match.findMany({
       where: { stageId: stage.id },
+      include: { events: true },
       orderBy: [{ round: 'desc' }, { index: 'asc' }],
     });
     return { matches };

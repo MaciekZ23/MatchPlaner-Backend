@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { MatchesController } from './matches.controller';
 import { MatchesService } from './matches.service';
 import { PrismaModule } from '../../database/prisma.module';
+import { PlayoffsModule } from '../playoffs/playoffs.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, PlayoffsModule],
   controllers: [MatchesController],
   providers: [MatchesService],
   exports: [MatchesService],
