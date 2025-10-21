@@ -128,6 +128,14 @@ export class TournamentsService {
     return toTournamentDto(t);
   }
 
+  async findAll() {
+    const rows = await this.prisma.tournament.findMany({
+      include: { groups: true, stages: true },
+    });
+
+    return rows.map(toTournamentDto);
+  }
+
   async create(dto: CreateTournamentDto) {
     const created = await this.prisma.$transaction(async (tx) => {
       const newId = await this.nextTournamentIdTx(tx);
@@ -204,6 +212,32 @@ export class TournamentsService {
     });
 
     return toTournamentDto(created);
+  }
+
+  private async safeDeleteStagesTx(
+    tx: Prisma.TransactionClient,
+    stageIds: string[],
+  ): Promise<void> {
+    if (!stageIds.length) return;
+
+    const matchIds = (
+      await tx.match.findMany({
+        where: { stageId: { in: stageIds } },
+        select: { id: true },
+      })
+    ).map((m) => m.id);
+
+    if (matchIds.length) {
+      await tx.matchEvent.deleteMany({ where: { matchId: { in: matchIds } } });
+
+      await tx.mVPVote
+        ?.deleteMany?.({ where: { matchId: { in: matchIds } } })
+        .catch(() => {});
+
+      await tx.match.deleteMany({ where: { id: { in: matchIds } } });
+    }
+
+    await tx.stage.deleteMany({ where: { id: { in: stageIds } } });
   }
 
   async update(id: string, dto: UpdateTournamentDto) {
@@ -298,6 +332,9 @@ export class TournamentsService {
             data: {
               ...(s.name !== undefined ? { name: s.name } : {}),
               ...(s.order !== undefined ? { order: s.order } : {}),
+              ...(s.kind !== undefined
+                ? { kind: s.kind as $Enums.StageKind }
+                : {}),
             },
           });
         }
@@ -305,9 +342,7 @@ export class TournamentsService {
 
       // 7) STAGE’E — DELETE
       if (dto.stagesDelete?.length) {
-        await tx.stage.deleteMany({
-          where: { id: { in: dto.stagesDelete } },
-        });
+        await this.safeDeleteStagesTx(tx, dto.stagesDelete);
       }
 
       // 8) Zwróć aktualny stan
@@ -320,10 +355,62 @@ export class TournamentsService {
   }
 
   async delete(id: string) {
-    await this.prisma.$transaction([
-      this.prisma.group.deleteMany({ where: { tournamentId: id } }),
-      this.prisma.stage.deleteMany({ where: { tournamentId: id } }),
-      this.prisma.tournament.delete({ where: { id } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      // 1) Stage IDs z turnieju
+      const stageIds = (
+        await tx.stage.findMany({
+          where: { tournamentId: id },
+          select: { id: true },
+        })
+      ).map((s) => s.id);
+
+      // 2) Match IDs dla tych stage’y
+      const matchIds = stageIds.length
+        ? (
+            await tx.match.findMany({
+              where: { stageId: { in: stageIds } },
+              select: { id: true },
+            })
+          ).map((m) => m.id)
+        : [];
+
+      // 3) Usuń eventy meczów (RESTRICT do Match)
+      if (matchIds.length) {
+        await tx.matchEvent.deleteMany({
+          where: { matchId: { in: matchIds } },
+        });
+
+        // Jeśli trzymasz osobną tabelę głosów bez FK – pominiesz; jeśli masz FK:
+        await tx.mVPVote
+          ?.deleteMany?.({ where: { matchId: { in: matchIds } } })
+          .catch(() => {});
+        // Voting kasuje się kaskadowo po Match (masz onDelete: Cascade w Voting->Match), więc nie trzeba go ruszać.
+      }
+
+      // 4) Usuń mecze (RESTRICT do Stage; kasuje też Voting dzięki cascade)
+      if (stageIds.length) {
+        await tx.match.deleteMany({ where: { stageId: { in: stageIds } } });
+      }
+
+      // 5) Usuń graczy i zespoły z turnieju (RESTRICT Player->Team, Team->Tournament)
+      const teamIds = (
+        await tx.team.findMany({
+          where: { tournamentId: id },
+          select: { id: true },
+        })
+      ).map((t) => t.id);
+
+      if (teamIds.length) {
+        await tx.player.deleteMany({ where: { teamId: { in: teamIds } } });
+        await tx.team.deleteMany({ where: { id: { in: teamIds } } });
+      }
+
+      // 6) Grupy i etapy
+      await tx.group.deleteMany({ where: { tournamentId: id } });
+      await tx.stage.deleteMany({ where: { tournamentId: id } });
+
+      // 7) Na końcu turniej
+      await tx.tournament.delete({ where: { id } });
+    });
   }
 }

@@ -86,6 +86,22 @@ export class CreateStageInput {
   order!: number;
 }
 
+export class UpdateStageInput {
+  @ApiProperty() @IsString() id!: string;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
+
+  @ApiPropertyOptional({ enum: StageKindValues })
+  @IsOptional()
+  @IsIn(StageKindValues)
+  kind?: StageKind;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+}
+
 export class CreateTournamentDto {
   @ApiProperty() @IsString() @IsNotEmpty() name!: string;
 
@@ -188,10 +204,11 @@ export class UpdateTournamentDto {
   stagesDelete?: string[];
 
   @ApiPropertyOptional({
-    type: Array,
-    description: 'Aktualizacje istniejących stage’y',
+    type: [UpdateStageInput],
   })
   @IsOptional()
   @IsArray()
-  stagesUpdate?: Array<{ id: string; name?: string; order?: number }>;
+  @ValidateNested({ each: true })
+  @Type(() => UpdateStageInput)
+  stagesUpdate?: UpdateStageInput[];
 }
