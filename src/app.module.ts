@@ -9,6 +9,8 @@ import { MatchesModule } from './modules/matches/matches.module';
 import { VotingModule } from './modules/voting/voting.module';
 import { AuthModule } from './auth/auth.module';
 import { PlayoffsModule } from './modules/playoffs/playoffs.module';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -20,8 +22,15 @@ import { PlayoffsModule } from './modules/playoffs/playoffs.module';
     AuthModule,
     VotingModule,
     PlayoffsModule,
+    // max 100 żądań / 60 s z jednego IP
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60,
+        limit: 100,
+      },
+    ]),
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
