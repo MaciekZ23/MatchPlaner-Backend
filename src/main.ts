@@ -7,9 +7,14 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { urlencoded, json } from 'express';
 import hpp from 'hpp';
 import { SanitizePipe } from './common/pipes/sanitize.pipe';
+import { Logger } from 'nestjs-pino';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
+
+  app.useLogger(app.get(Logger));
 
   app.set('trust proxy', 1);
 
