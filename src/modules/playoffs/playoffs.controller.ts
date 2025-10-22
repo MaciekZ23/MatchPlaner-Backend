@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { PlayoffsService } from './playoffs.service';
 import { GeneratePlayoffsDto } from './dto/generate-playoffs.dto';
 import { PrismaService } from 'src/database/prisma.service';
+import { Public } from 'src/auth/public.decorator';
+import { Roles } from 'src/auth/roles.decorator';
 
 @Controller('playoffs')
 export class PlayoffsController {
@@ -10,6 +12,7 @@ export class PlayoffsController {
     private readonly prisma: PrismaService,
   ) {}
 
+  @Public()
   @Get(':tournamentId')
   async getBracket(@Param('tournamentId') tournamentId: string) {
     const stage = await this.prisma.stage.findFirst({
@@ -26,6 +29,7 @@ export class PlayoffsController {
     return { matches };
   }
 
+  @Roles('ADMIN')
   @Post('generate/:tournamentId')
   async generate(
     @Param('tournamentId') tournamentId: string,

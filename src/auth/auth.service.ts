@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from 'src/database/prisma.service';
@@ -18,7 +19,20 @@ export class AuthService {
   constructor(
     private jwt: JwtService,
     private prisma: PrismaService,
+    private cfg: ConfigService,
   ) {}
+
+  private async signAccessToken(payload: Record<string, any>) {
+    const expiresIn = this.cfg.get<string>('JWT_EXPIRES_IN') || '15m';
+    return this.jwt.signAsync(payload, { expiresIn });
+  }
+
+  private async signRefreshToken(payload: Record<string, any>) {
+    const secret =
+      this.cfg.get<string>('REFRESH_JWT_SECRET') || this.cfg.get('JWT_SECRET')!;
+    const expiresIn = this.cfg.get<string>('REFRESH_JWT_EXPIRES_IN') || '7d';
+    return this.jwt.signAsync(payload, { secret, expiresIn });
+  }
 
   async verifyGoogleAndLogin(idToken: string) {
     let payload: any;
@@ -63,17 +77,24 @@ export class AuthService {
       });
     }
 
-    const token = await this.jwt.signAsync({
+    const basePayload = {
       sub: user.id,
       role: user.role,
       email: user.email,
       name: user.name,
       avatar: user.avatarUrl ?? null,
       kind: 'USER',
+    };
+
+    const accessToken = await this.signAccessToken(basePayload);
+    const refreshToken = await this.signRefreshToken({
+      sub: user.id,
+      role: user.role,
     });
 
     return {
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -89,15 +110,49 @@ export class AuthService {
       throw new UnauthorizedException('deviceId required');
     }
     const guestId = `g_${cryptoRandomId()}`;
-
-    const token = await this.jwt.signAsync({
+    const basePayload = {
       sub: guestId,
       role: 'GUEST',
       deviceId,
       kind: 'GUEST',
+    };
+
+    const accessToken = await this.signAccessToken(basePayload);
+    const refreshToken = await this.signRefreshToken({
+      sub: guestId,
+      role: 'GUEST',
     });
 
-    return { token, user: { id: guestId, role: 'GUEST', avatarUrl: null } };
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: guestId, role: 'GUEST', avatarUrl: null },
+    };
+  }
+
+  async refreshToken(refreshToken: string) {
+    try {
+      const secret =
+        this.cfg.get<string>('REFRESH_JWT_SECRET') ||
+        this.cfg.get('JWT_SECRET')!;
+      const payload = await this.jwt.verifyAsync(refreshToken, { secret });
+
+      const user = await this.prisma.user
+        .findUnique({ where: { id: payload.sub } })
+        .catch(() => null);
+
+      const role = user?.role ?? payload.role ?? 'GUEST';
+
+      const accessToken = await this.signAccessToken({
+        sub: payload.sub,
+        role,
+        kind: role === 'GUEST' ? 'GUEST' : 'USER',
+      });
+
+      return { accessToken };
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
   }
 }
 

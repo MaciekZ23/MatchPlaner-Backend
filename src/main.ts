@@ -4,12 +4,19 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { urlencoded, json } from 'express';
+import hpp from 'hpp';
+import { SanitizePipe } from './common/pipes/sanitize.pipe';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.set('trust proxy', 1);
 
+  app.use(json({ limit: '200kb' }));
+  app.use(urlencoded({ extended: true, limit: '200kb' }));
+
+  app.use(hpp());
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -29,6 +36,7 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(
+    new SanitizePipe(),
     new ValidationPipe({
       whitelist: true,
       transform: true,
@@ -36,15 +44,17 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('MatchPlaner API')
-    .setVersion('1.0')
-    .build();
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('MatchPlaner API')
+      .setVersion('1.0')
+      .build();
 
-  const swaggerDoc = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, swaggerDoc, {
-    swaggerOptions: { persistAuthorization: true },
-  });
+    const swaggerDoc = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, swaggerDoc, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
