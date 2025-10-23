@@ -30,7 +30,11 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: ['https://matchplaner.netlify.app', 'http://localhost:4200'],
+    origin: [
+      'https://matchplaner.netlify.app',
+      'https://matchplaner.onrender.com',
+      'http://localhost:4200',
+    ],
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
