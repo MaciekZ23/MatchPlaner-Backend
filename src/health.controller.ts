@@ -7,10 +7,10 @@ import {
 } from '@nestjs/common';
 import { Public } from './auth/public.decorator';
 
-@Controller('api')
+@Controller('health')
 export class HealthController {
   @Public()
-  @Get('health')
+  @Get()
   getHealth(@Query('key') key: string) {
     if (process.env.HEALTH_KEY && key !== process.env.HEALTH_KEY) {
       throw new UnauthorizedException('Invalid health key');
