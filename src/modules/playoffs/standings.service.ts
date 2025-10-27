@@ -54,7 +54,14 @@ export class StandingsService {
     for (const g of groups) {
       // baza wierszy
       const rows = new Map<string, Row>();
-      for (const tid of g.teamIds) {
+      const teamIds = (
+        await this.prisma.team.findMany({
+          where: { groupId: g.id },
+          select: { id: true },
+        })
+      ).map((t) => t.id);
+
+      for (const tid of teamIds) {
         rows.set(tid, {
           teamId: tid,
           pts: 0,

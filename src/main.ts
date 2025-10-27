@@ -11,24 +11,34 @@ import { Logger } from 'nestjs-pino';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
+  // Tworzy aplikację Express na bazie NestJS
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    bufferLogs: true,
+    bufferLogs: true, // Buforuje logi zanim logger zostanie w pełni zainicjowany
   });
 
+  // Logger zabezpieczony (np. nie loguje haseł itp.)
+  // Służy do logowania requestów, błędów itd.
   app.useLogger(app.get(Logger));
 
+  // Render, Netlify używają proxy — dzięki temu app zna poprawny adres IP użytkownika
   app.set('trust proxy', 1);
 
+  // Ogranicza rozmiar danych w żądaniu (ochrona przed DoS)
   app.use(json({ limit: '200kb' }));
   app.use(urlencoded({ extended: true, limit: '200kb' }));
 
+  // hpp - zabezpiecza przed HTTP Parameter Pollution (wielokrotne parametry)
   app.use(hpp());
+
+  // helmet - ustawia bezpieczne nagłówki HTTP
+  // (m.in. X-DNS-Prefetch-Control, X-Frame-Options, X-Content-Type-Options, itp.)
   app.use(
     helmet({
       contentSecurityPolicy: false,
     }),
   );
 
+  // CORS - pozwala tylko określonym domenom na połączenia z backendem
   app.enableCors({
     origin: [
       'https://matchplaner.netlify.app',
@@ -45,17 +55,20 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
+  // Globalne "Pipes" - walidacja i sanityzacja danych
   app.useGlobalPipes(
-    new SanitizePipe(),
+    new SanitizePipe(), // usuwa niebezpieczne znaki (np. XSS)
     new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
+      whitelist: true, // usuwa pola, których nie ma w DTO
+      transform: true, // automatyczna konwersja typów (np. string → number)
+      forbidNonWhitelisted: true, // rzuca błąd, jeśli w body są pola spoza DTO
     }),
   );
 
+  // Globalny "Filter" - obsługa wyjątków (centralny error handler)
   app.useGlobalFilters(new AllExceptionsFilter(app.get(Logger)));
 
+  // Swagger - dokumentacja API (w trybie deweloperskim)
   if (process.env.NODE_ENV !== 'production') {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('MatchPlaner API')
@@ -68,6 +81,7 @@ async function bootstrap() {
     });
   }
 
+  // Uruchomienie serwera na porcie z ENV lub domyślnym 3000
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
   console.log(` Server is running on port ${port}`);

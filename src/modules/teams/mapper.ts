@@ -15,5 +15,6 @@ export const toTeamDto = (t: Team & { players?: Player[] }): TeamDto => ({
   id: String(t.id),
   name: t.name,
   logo: t.logo ?? undefined,
+  groupId: t.groupId ?? undefined,
   playerIds: (t.players ?? []).map((p) => p.id),
 });

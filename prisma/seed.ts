@@ -4,11 +4,11 @@ const prisma = new PrismaClient();
 const TOURNAMENT_ID = 't1';
 const MODE: 'reset' | 'append' = (process.env.SEED_MODE as any) ?? 'append';
 
-const groups: Array<{ id: string; name: string; teamIds: string[] }> = [
-  { id: 'A', name: 'Grupa A', teamIds: ['T1', 'T2', 'T3', 'T4'] },
-  { id: 'B', name: 'Grupa B', teamIds: ['T5', 'T6', 'T7', 'T8'] },
-  { id: 'C', name: 'Grupa C', teamIds: ['T9', 'T10', 'T11', 'T12'] },
-  { id: 'D', name: 'Grupa D', teamIds: ['T13', 'T14', 'T15', 'T16'] },
+const groups: Array<{ id: string; name: string }> = [
+  { id: 'A', name: 'Grupa A' },
+  { id: 'B', name: 'Grupa B' },
+  { id: 'C', name: 'Grupa C' },
+  { id: 'D', name: 'Grupa D' },
 ];
 
 const stages: Array<{
@@ -29,6 +29,7 @@ type TeamSeed = {
   name: string;
   logo?: string;
   playerIds: string[];
+  groupId: string;
 };
 const teams: TeamSeed[] = [
   {
@@ -52,6 +53,7 @@ const teams: TeamSeed[] = [
       'P14',
       'P15',
     ],
+    groupId: 'A',
   },
   {
     id: 'T2',
@@ -74,6 +76,7 @@ const teams: TeamSeed[] = [
       'P29',
       'P30',
     ],
+    groupId: 'A',
   },
   {
     id: 'T3',
@@ -96,6 +99,7 @@ const teams: TeamSeed[] = [
       'P44',
       'P45',
     ],
+    groupId: 'A',
   },
   {
     id: 'T4',
@@ -118,6 +122,7 @@ const teams: TeamSeed[] = [
       'P59',
       'P60',
     ],
+    groupId: 'A',
   },
   {
     id: 'T5',
@@ -140,6 +145,7 @@ const teams: TeamSeed[] = [
       'P74',
       'P75',
     ],
+    groupId: 'B',
   },
   {
     id: 'T6',
@@ -162,6 +168,7 @@ const teams: TeamSeed[] = [
       'P89',
       'P90',
     ],
+    groupId: 'B',
   },
   {
     id: 'T7',
@@ -184,6 +191,7 @@ const teams: TeamSeed[] = [
       'P104',
       'P105',
     ],
+    groupId: 'B',
   },
   {
     id: 'T8',
@@ -206,6 +214,7 @@ const teams: TeamSeed[] = [
       'P119',
       'P120',
     ],
+    groupId: 'B',
   },
   {
     id: 'T9',
@@ -228,6 +237,7 @@ const teams: TeamSeed[] = [
       'P134',
       'P135',
     ],
+    groupId: 'C',
   },
   {
     id: 'T10',
@@ -250,6 +260,7 @@ const teams: TeamSeed[] = [
       'P149',
       'P150',
     ],
+    groupId: 'C',
   },
   {
     id: 'T11',
@@ -272,6 +283,7 @@ const teams: TeamSeed[] = [
       'P164',
       'P165',
     ],
+    groupId: 'C',
   },
   {
     id: 'T12',
@@ -294,6 +306,7 @@ const teams: TeamSeed[] = [
       'P179',
       'P180',
     ],
+    groupId: 'C',
   },
   {
     id: 'T13',
@@ -316,6 +329,7 @@ const teams: TeamSeed[] = [
       'P194',
       'P195',
     ],
+    groupId: 'D',
   },
   {
     id: 'T14',
@@ -338,6 +352,7 @@ const teams: TeamSeed[] = [
       'P209',
       'P210',
     ],
+    groupId: 'D',
   },
   {
     id: 'T15',
@@ -360,6 +375,7 @@ const teams: TeamSeed[] = [
       'P224',
       'P225',
     ],
+    groupId: 'D',
   },
   {
     id: 'T16',
@@ -382,6 +398,7 @@ const teams: TeamSeed[] = [
       'P239',
       'P240',
     ],
+    groupId: 'D',
   },
 ];
 
@@ -3196,11 +3213,10 @@ async function main() {
   for (const g of groups) {
     await prisma.group.upsert({
       where: { id: g.id },
-      update: { name: g.name, teamIds: g.teamIds, tournamentId: TOURNAMENT_ID },
+      update: { name: g.name, tournamentId: TOURNAMENT_ID },
       create: {
         id: g.id,
         name: g.name,
-        teamIds: g.teamIds,
         tournamentId: TOURNAMENT_ID,
       },
     });
@@ -3232,12 +3248,14 @@ async function main() {
         name: t.name,
         logo: t.logo ?? null,
         tournamentId: TOURNAMENT_ID,
+        groupId: t.groupId,
       },
       create: {
         id: t.id,
         name: t.name,
         logo: t.logo ?? null,
         tournamentId: TOURNAMENT_ID,
+        groupId: t.groupId,
       },
     });
   }

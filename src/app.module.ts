@@ -14,6 +14,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { RolesGuard } from './auth/roles.guard';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { LoggerModule } from 'nestjs-pino';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -55,7 +56,7 @@ import { LoggerModule } from 'nestjs-pino';
       },
     ]),
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },

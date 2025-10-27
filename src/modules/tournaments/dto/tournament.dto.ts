@@ -24,11 +24,6 @@ export type StageKind = (typeof StageKindValues)[number];
 export class GroupDto {
   @ApiProperty() @IsString() id!: string;
   @ApiProperty() @IsString() name!: string;
-
-  @ApiProperty({ type: [String] })
-  @IsArray()
-  @IsString({ each: true })
-  teamIds!: string[];
 }
 
 export class StageDto {
@@ -67,11 +62,6 @@ export class TournamentDto {
 
 export class CreateGroupInput {
   @ApiProperty() @IsString() name!: string;
-
-  @ApiProperty({ type: [String] })
-  @IsArray()
-  @IsString({ each: true })
-  teamIds!: string[];
 }
 
 export class CreateStageInput {
@@ -187,7 +177,7 @@ export class UpdateTournamentDto {
   })
   @IsOptional()
   @IsArray()
-  groupsUpdate?: Array<{ id: string; name?: string; teamIds?: string[] }>;
+  groupsUpdate?: Array<{ id: string; name?: string }>;
 
   // ---- operacje na stage’ach ----
   @ApiPropertyOptional({ type: [CreateStageInput] })

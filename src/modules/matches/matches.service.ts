@@ -325,7 +325,14 @@ export class MatchesService {
     // 2a) Walidacja: drużyna tylko w jednej grupie
     const seen = new Map<string, string>(); // teamId -> groupId
     for (const g of groups) {
-      for (const tid of g.teamIds) {
+      const teamIds = (
+        await this.prisma.team.findMany({
+          where: { groupId: g.id },
+          select: { id: true },
+        })
+      ).map((t) => t.id);
+
+      for (const tid of teamIds) {
         const prev = seen.get(tid);
         if (prev && prev !== g.id) {
           throw new BadRequestException(
@@ -568,7 +575,14 @@ export class MatchesService {
       // 8a) Zbuduj rundy dla każdej grupy
       const roundsByGroup = new Map<string, Array<Array<[string, string]>>>();
       for (const g of groups) {
-        roundsByGroup.set(g.id, buildRounds(g.teamIds));
+        const teamIds = (
+          await this.prisma.team.findMany({
+            where: { groupId: g.id },
+            select: { id: true },
+          })
+        ).map((t) => t.id);
+
+        roundsByGroup.set(g.id, buildRounds(teamIds));
       }
 
       // maksymalna liczba kolejek

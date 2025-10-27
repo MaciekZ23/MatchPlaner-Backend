@@ -86,6 +86,7 @@ export class TeamsService {
           name: body.name.trim(),
           logo: body.logo && body.logo.trim() ? body.logo.trim() : null,
           tournamentId,
+          groupId: body.groupId ?? null,
         },
         include: { players: { select: { id: true } } },
       });
@@ -164,6 +165,23 @@ export class TeamsService {
     if (body.logo !== undefined) {
       const val = typeof body.logo === 'string' ? body.logo.trim() : body.logo;
       data.logo = val ? val : null;
+    }
+
+    if (body.groupId !== undefined) {
+      const trimmed = body.groupId?.trim() || null;
+
+      if (!trimmed) {
+        data.group = { disconnect: true };
+      } else {
+        const group = await this.prisma.group.findUnique({
+          where: { id: trimmed },
+        });
+        if (!group) {
+          throw new NotFoundException('Podana grupa nie istnieje');
+        }
+
+        data.group = { connect: { id: trimmed } };
+      }
     }
 
     const updated = await this.prisma.team.update({

@@ -144,13 +144,14 @@ export class TournamentsService {
         (dto.mode as $Enums.TournamentMode) ?? $Enums.TournamentMode.LEAGUE;
 
       let groupsData:
-        | { create: Array<{ id: string; name: string; teamIds: string[] }> }
+        | { create: Array<{ id: string; name: string }> }
         | undefined;
+
       if (dto.groups?.length) {
-        const arr: Array<{ id: string; name: string; teamIds: string[] }> = [];
+        const arr: Array<{ id: string; name: string }> = [];
         for (const g of dto.groups) {
           const gid = await this.nextGroupIdTx(tx);
-          arr.push({ id: gid, name: g.name, teamIds: g.teamIds ?? [] });
+          arr.push({ id: gid, name: g.name });
         }
         groupsData = { create: arr };
       }
@@ -282,7 +283,6 @@ export class TournamentsService {
               tournamentId: id,
               id: gid,
               name: g.name,
-              teamIds: g.teamIds ?? [],
             },
           });
         }
@@ -293,10 +293,7 @@ export class TournamentsService {
         for (const g of dto.groupsUpdate) {
           await tx.group.update({
             where: { id: g.id },
-            data: {
-              ...(g.name !== undefined ? { name: g.name } : {}),
-              ...(g.teamIds !== undefined ? { teamIds: g.teamIds } : {}),
-            },
+            data: g.name !== undefined ? { name: g.name } : {},
           });
         }
       }

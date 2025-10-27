@@ -12,4 +12,9 @@ export class CreateTeamDto {
   @IsString()
   @MaxLength(300)
   logo?: string | null;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  groupId?: string | null;
 }

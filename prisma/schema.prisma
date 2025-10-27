@@ -83,10 +83,10 @@ model Tournament {
 model Group {
   id String @id @default(cuid())
   name String
-  teamIds String[]
   tournament Tournament @relation(fields: [tournamentId], references: [id])
   tournamentId String
   matches    Match[]
+  teams Team[]   @relation("GroupTeams")
   @@map("groups")
 }
 
@@ -107,6 +107,8 @@ model Team {
   logo         String?                          
   tournament   Tournament @relation(fields: [tournamentId], references: [id])
   tournamentId String
+  group        Group?    @relation("GroupTeams", fields: [groupId], references: [id])
+  groupId      String?
   players      Player[]
   homeMatches  Match[]  @relation("HomeTeam")
   awayMatches  Match[]  @relation("AwayTeam")

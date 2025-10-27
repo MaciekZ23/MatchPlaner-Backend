@@ -15,7 +15,7 @@ export const toTournamentDto = (
   venue: t.venue ?? undefined,
   venueAddress: t.venueAddress ?? undefined,
   venueImageUrl: t.venueImageUrl ?? undefined,
-  groups: t.groups.map((g) => ({ id: g.id, name: g.name, teamIds: g.teamIds })),
+  groups: t.groups.map((g) => ({ id: g.id, name: g.name })),
   stages: t.stages.map((s) => ({
     id: s.id,
     name: s.name,
