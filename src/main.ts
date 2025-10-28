@@ -23,9 +23,14 @@ async function bootstrap() {
   // Render, Netlify używają proxy — dzięki temu app zna poprawny adres IP użytkownika
   app.set('trust proxy', 1);
 
+  app.use((req, res, next) => {
+    res.setHeader('Charset', 'utf-8');
+    next();
+  });
+
   // Ogranicza rozmiar danych w żądaniu (ochrona przed DoS)
-  app.use(json({ limit: '200kb' }));
-  app.use(urlencoded({ extended: true, limit: '200kb' }));
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   // hpp - zabezpiecza przed HTTP Parameter Pollution (wielokrotne parametry)
   app.use(hpp());
@@ -57,11 +62,13 @@ async function bootstrap() {
 
   // Globalne "Pipes" - walidacja i sanityzacja danych
   app.useGlobalPipes(
-    new SanitizePipe(), // usuwa niebezpieczne znaki (np. XSS)
+    new SanitizePipe(),
     new ValidationPipe({
-      whitelist: true, // usuwa pola, których nie ma w DTO
-      transform: true, // automatyczna konwersja typów (np. string → number)
-      forbidNonWhitelisted: true, // rzuca błąd, jeśli w body są pola spoza DTO
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+      skipUndefinedProperties: true,
+      skipMissingProperties: true,
     }),
   );
 

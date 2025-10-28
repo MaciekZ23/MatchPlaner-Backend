@@ -7,16 +7,24 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
   Version,
 } from '@nestjs/common';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto, UpdateTournamentDto } from './dto/tournament.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { Public } from 'src/auth/public.decorator';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes } from '@nestjs/swagger';
 
 @Controller('tournaments')
 export class TournamentsController {
-  constructor(private readonly service: TournamentsService) {}
+  constructor(
+    private readonly service: TournamentsService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   @Public()
   @Version('1')
@@ -52,5 +60,20 @@ export class TournamentsController {
   @HttpCode(204)
   remove(@Param('id') id: string) {
     return this.service.delete(id);
+  }
+
+  @Post(':id/upload-venue')
+  @Roles('ADMIN')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  async uploadVenueImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const uploaded = await this.cloudinary.uploadImage(file);
+
+    return this.service.update(id, {
+      venueImageUrl: (uploaded as any).secure_url,
+    });
   }
 }

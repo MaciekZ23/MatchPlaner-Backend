@@ -7,11 +7,14 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -26,10 +29,15 @@ import { RolesGuard } from 'src/auth/roles.guard';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { UpdatePlayerDto } from './dto/update-player.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('teams')
 export class TeamsController {
-  constructor(private readonly teamsService: TeamsService) {}
+  constructor(
+    private readonly teamsService: TeamsService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   @Get('tournament/:tournamentId')
   @ApiOkResponse({ type: [TeamDto] })
@@ -112,5 +120,21 @@ export class TeamsController {
   @HttpCode(204)
   async deletePlayer(@Param('playerId') playerId: string): Promise<void> {
     await this.teamsService.deletePlayer(playerId);
+  }
+
+  @Post('tournament/:teamId/upload-logo')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  async uploadTeamLogo(
+    @Param('teamId') teamId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const uploaded = await this.cloudinary.uploadImage(file);
+
+    return this.teamsService.updateTeam(teamId, {
+      logo: (uploaded as any).secure_url,
+    });
   }
 }

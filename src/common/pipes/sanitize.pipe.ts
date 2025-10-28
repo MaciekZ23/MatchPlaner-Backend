@@ -3,7 +3,15 @@ import sanitizeHtml from 'sanitize-html';
 
 @Injectable()
 export class SanitizePipe implements PipeTransform {
-  transform(value: any, _metadata: ArgumentMetadata) {
+  transform(value: any, metadata: ArgumentMetadata) {
+    if (
+      metadata.type === 'custom' ||
+      value instanceof Buffer ||
+      value?.buffer instanceof Buffer
+    ) {
+      return value;
+    }
+
     return this.clean(value);
   }
 
@@ -11,18 +19,18 @@ export class SanitizePipe implements PipeTransform {
     if (input == null) return input;
 
     if (typeof input === 'string') {
-      // 1) usuń znaki sterujące i trim
-      const trimmed = input.replace(/[\u0000-\u001F\u007F]/g, '').trim();
+      const trimmed = input.replace(/[\u0000-\u001F\u007F]+/g, '').trim();
 
-      // 2) minimalna sanityzacja HTML (wyłączona prawie cała treść HTML)
+      // NIE naruszamy znaków Unicode
       const sanitized = sanitizeHtml(trimmed, {
-        allowedTags: [], // nic HTML nie przepuszczamy
+        allowedTags: [],
         allowedAttributes: {},
-        // usuń komentarze, skrypty itp.
         disallowedTagsMode: 'discard',
+        parser: {
+          decodeEntities: false,
+        },
       });
 
-      // 3) zredukuj wielokrotne spacje do jednej
       return sanitized.replace(/\s{2,}/g, ' ');
     }
 
