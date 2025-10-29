@@ -80,7 +80,7 @@ export class PlayoffsService {
       matchTimes: dto.matchTimes,
       firstMatchTime: dto.firstMatchTime,
       matchIntervalMinutes: dto.matchIntervalMinutes,
-      dayInterval: dto.dayInterval ?? 0,
+      dayInterval: dto.roundInSingleDay ? 0 : (dto.dayInterval ?? 0),
       roundInSingleDay: dto.roundInSingleDay ?? true,
       withThirdPlace: dto.withThirdPlace ?? true,
       clearExisting: dto.clearExisting ?? false,

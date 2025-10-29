@@ -41,9 +41,10 @@ export class GeneratePlayoffsDto {
   matchIntervalMinutes?: number;
 
   @ApiPropertyOptional({ example: 7 })
+  @ValidateIf((o) => o.roundInSingleDay === false)
   @IsInt()
-  @Min(0)
-  @IsOptional()
+  @Min(1)
+  @IsDefined()
   dayInterval?: number;
 
   @ApiPropertyOptional({})
