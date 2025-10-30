@@ -178,9 +178,204 @@ export class PlayoffsService {
   }
 
   // NEW: alokator slotów czasowych – wersja bez allocateWrapper
+  // private makeAllocator(opts: SchedulingOptions) {
+  //   const dayInterval = opts.dayInterval ?? 0;
+  //   const roundInSingleDay = opts.roundInSingleDay ?? true;
+
+  //   const toMin = (hhmm: string) => {
+  //     const [hh, mm] = hhmm.split(':').map(Number);
+  //     return hh * 60 + mm;
+  //   };
+  //   const toHHMM = (mins: number) => {
+  //     const h = Math.floor(mins / 60) % 24;
+  //     const m = mins % 60;
+  //     const pad = (n: number) => String(n).padStart(2, '0');
+  //     return `${pad(h)}:${pad(m)}`;
+  //   };
+
+  //   const declared = Array.from(new Set(opts.matchTimes ?? []))
+  //     .map((s) => s.trim())
+  //     .filter(Boolean)
+  //     .sort((a, b) => a.localeCompare(b));
+
+  //   const intervalMode = declared.length === 0;
+  //   const first = opts.firstMatchTime ?? '18:00';
+  //   const intervalMinutes = opts.matchIntervalMinutes ?? 120;
+
+  //   // stan per data
+  //   type DateState = { slotIdx: number; lastSlotMins: number };
+  //   const dateState = new Map<string, DateState>();
+  //   const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> Set('HH:mm')
+
+  //   const markUsed = (ymd: string, hhmm: string) => {
+  //     if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
+  //     usedTimesPerDate.get(ymd)!.add(hhmm);
+  //   };
+  //   const isUsed = (ymd: string, hhmm: string) =>
+  //     usedTimesPerDate.get(ymd)?.has(hhmm) ?? false;
+
+  //   const ensureState = (d: string): DateState => {
+  //     if (!dateState.has(d)) {
+  //       dateState.set(d, {
+  //         slotIdx: 0,
+  //         lastSlotMins: intervalMode
+  //           ? toMin(first)
+  //           : toMin(declared[0] ?? first),
+  //       });
+  //     }
+  //     return dateState.get(d)!;
+  //   };
+
+  //   const pickFree = (
+  //     ymdLocal: string,
+  //     baseMins: number,
+  //     stepMins: number,
+  //   ): string | null => {
+  //     let mins = baseMins;
+  //     while (mins < 24 * 60) {
+  //       const hhmm = toHHMM(mins);
+  //       if (!isUsed(ymdLocal, hhmm)) return hhmm;
+  //       mins += stepMins;
+  //     }
+  //     return null;
+  //   };
+
+  //   // narzędzia do startowania od "początku dnia"
+  //   const firstSlotOfDay = (ymdLocal: string): string => {
+  //     if (!intervalMode) {
+  //       // najpierw spróbuj pierwszej z listy; jak zajęta, weź kolejną o krok=step
+  //       const step =
+  //         opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
+  //           ? opts.matchIntervalMinutes
+  //           : declared.length >= 2
+  //             ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
+  //             : intervalMinutes;
+  //       const base = toMin(declared[0] ?? first);
+  //       return pickFree(ymdLocal, base, step) ?? declared[0] ?? first;
+  //     } else {
+  //       const base = toMin(first);
+  //       return pickFree(ymdLocal, base, intervalMinutes) ?? first;
+  //     }
+  //   };
+
+  //   // sterowanie datą rundy
+  //   let roundDay = opts.startDate; // YYYY-MM-DD
+
+  //   return {
+  //     startOfRound: (ymd: string) => {
+  //       roundDay = ymd;
+  //     },
+  //     nextRoundDay: (ymd: string) => this.addDays(ymd, dayInterval),
+
+  //     allocate: (): { ymd: string; hhmm: string } => {
+  //       let ymd = roundDay;
+  //       let st = ensureState(ymd);
+
+  //       if (!intervalMode) {
+  //         // tryb z listą godzin
+  //         while (st.slotIdx < declared.length) {
+  //           const cand = declared[st.slotIdx++];
+  //           if (!isUsed(ymd, cand)) {
+  //             markUsed(ymd, cand);
+  //             st.lastSlotMins = toMin(cand);
+  //             return { ymd, hhmm: cand };
+  //           }
+  //         }
+
+  //         // brak godzin – spróbuj dołożyć interwałem w tym dniu
+  //         const step =
+  //           opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
+  //             ? opts.matchIntervalMinutes
+  //             : declared.length >= 2
+  //               ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
+  //               : intervalMinutes;
+
+  //         const from = st.lastSlotMins + step;
+  //         const free = pickFree(ymd, from, step);
+  //         if (free) {
+  //           markUsed(ymd, free);
+  //           st.lastSlotMins = toMin(free);
+  //           return { ymd, hhmm: free };
+  //         }
+
+  //         if (!roundInSingleDay) {
+  //           // przelew na kolejny dzień – zacznij od pierwszego slotu dnia
+  //           roundDay = this.addDays(roundDay, 1);
+  //           ymd = roundDay;
+  //           st = ensureState(ymd);
+  //           const firstFree = firstSlotOfDay(ymd);
+  //           markUsed(ymd, firstFree);
+  //           st.lastSlotMins = toMin(firstFree);
+  //           st.slotIdx = Math.max(st.slotIdx, intervalMode ? 1 : 1); // „coś” już zużyliśmy
+  //           return { ymd, hhmm: firstFree };
+  //         }
+
+  //         // wymuś w obrębie dnia (zawijanie)
+  //         let mins = from;
+  //         while (isUsed(ymd, toHHMM(mins))) {
+  //           mins += step;
+  //         }
+
+  //         // jeśli przekroczyliśmy 24h → przejdź do następnego dnia (nocny turniej)
+  //         if (mins >= 24 * 60) {
+  //           roundDay = this.addDays(roundDay, 1);
+  //           ymd = roundDay;
+  //           mins = mins - 24 * 60;
+  //         }
+
+  //         const hhmm = toHHMM(mins);
+  //         markUsed(ymd, hhmm);
+  //         st.lastSlotMins = mins;
+  //         return { ymd, hhmm };
+  //       } else {
+  //         // tryb interwałów
+  //         const from =
+  //           st.slotIdx === 0 ? toMin(first) : st.lastSlotMins + intervalMinutes;
+  //         st.slotIdx++;
+  //         const free = pickFree(ymd, from, intervalMinutes);
+  //         if (free) {
+  //           markUsed(ymd, free);
+  //           st.lastSlotMins = toMin(free);
+  //           return { ymd, hhmm: free };
+  //         }
+
+  //         if (!roundInSingleDay) {
+  //           roundDay = this.addDays(roundDay, 1);
+  //           ymd = roundDay;
+  //           st = ensureState(ymd);
+  //           const firstFree = firstSlotOfDay(ymd);
+  //           markUsed(ymd, firstFree);
+  //           st.lastSlotMins = toMin(firstFree);
+  //           st.slotIdx = Math.max(st.slotIdx, 1);
+  //           return { ymd, hhmm: firstFree };
+  //         }
+
+  //         // zawijanie w obrębie dnia
+  //         let mins = from;
+  //         while (isUsed(ymd, toHHMM(mins))) {
+  //           mins += intervalMinutes;
+  //         }
+
+  //         // jeśli przeszliśmy po północy -> robimy nocny ciąg
+  //         if (mins >= 24 * 60) {
+  //           roundDay = this.addDays(roundDay, 1);
+  //           ymd = roundDay;
+  //           mins = mins - 24 * 60;
+  //         }
+
+  //         const hhmm = toHHMM(mins);
+  //         markUsed(ymd, hhmm);
+  //         st.lastSlotMins = mins;
+  //         return { ymd, hhmm };
+  //       }
+  //     },
+  //   };
+  // }
+
   private makeAllocator(opts: SchedulingOptions) {
-    const dayInterval = opts.dayInterval ?? 0;
+    const interval = opts.matchIntervalMinutes ?? 60;
     const roundInSingleDay = opts.roundInSingleDay ?? true;
+    const firstTime = opts.firstMatchTime ?? '22:00';
 
     const toMin = (hhmm: string) => {
       const [hh, mm] = hhmm.split(':').map(Number);
@@ -189,166 +384,40 @@ export class PlayoffsService {
     const toHHMM = (mins: number) => {
       const h = Math.floor(mins / 60) % 24;
       const m = mins % 60;
-      const pad = (n: number) => String(n).padStart(2, '0');
-      return `${pad(h)}:${pad(m)}`;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+    const addDays = (ymd: string, days: number) => {
+      const d = new Date(ymd);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().slice(0, 10);
     };
 
-    const declared = Array.from(new Set(opts.matchTimes ?? []))
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-
-    const intervalMode = declared.length === 0;
-    const first = opts.firstMatchTime ?? '18:00';
-    const intervalMinutes = opts.matchIntervalMinutes ?? 120;
-
-    // stan per data
-    type DateState = { slotIdx: number; lastSlotMins: number };
-    const dateState = new Map<string, DateState>();
-    const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> Set('HH:mm')
-
-    const markUsed = (ymd: string, hhmm: string) => {
-      if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
-      usedTimesPerDate.get(ymd)!.add(hhmm);
-    };
-    const isUsed = (ymd: string, hhmm: string) =>
-      usedTimesPerDate.get(ymd)?.has(hhmm) ?? false;
-
-    const ensureState = (d: string): DateState => {
-      if (!dateState.has(d)) {
-        dateState.set(d, {
-          slotIdx: 0,
-          lastSlotMins: intervalMode
-            ? toMin(first)
-            : toMin(declared[0] ?? first),
-        });
-      }
-      return dateState.get(d)!;
-    };
-
-    const pickFree = (
-      ymdLocal: string,
-      baseMins: number,
-      stepMins: number,
-    ): string | null => {
-      let mins = baseMins;
-      while (mins < 24 * 60) {
-        const hhmm = toHHMM(mins);
-        if (!isUsed(ymdLocal, hhmm)) return hhmm;
-        mins += stepMins;
-      }
-      return null;
-    };
-
-    // narzędzia do startowania od "początku dnia"
-    const firstSlotOfDay = (ymdLocal: string): string => {
-      if (!intervalMode) {
-        // najpierw spróbuj pierwszej z listy; jak zajęta, weź kolejną o krok=step
-        const step =
-          opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
-            ? opts.matchIntervalMinutes
-            : declared.length >= 2
-              ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
-              : intervalMinutes;
-        const base = toMin(declared[0] ?? first);
-        return pickFree(ymdLocal, base, step) ?? declared[0] ?? first;
-      } else {
-        const base = toMin(first);
-        return pickFree(ymdLocal, base, intervalMinutes) ?? first;
-      }
-    };
-
-    // sterowanie datą rundy
-    let roundDay = opts.startDate; // YYYY-MM-DD
+    let curDay = opts.startDate; // YYYY-MM-DD
+    let curMins = toMin(firstTime); // start hour
 
     return {
       startOfRound: (ymd: string) => {
-        roundDay = ymd;
+        curDay = ymd;
+        curMins = toMin(firstTime);
       },
-      nextRoundDay: (ymd: string) => this.addDays(ymd, dayInterval),
 
-      allocate: (): { ymd: string; hhmm: string } => {
-        let ymd = roundDay;
-        let st = ensureState(ymd);
+      nextRoundDay: (ymd: string) => addDays(ymd, opts.dayInterval ?? 0),
 
-        if (!intervalMode) {
-          // tryb z listą godzin
-          while (st.slotIdx < declared.length) {
-            const cand = declared[st.slotIdx++];
-            if (!isUsed(ymd, cand)) {
-              markUsed(ymd, cand);
-              st.lastSlotMins = toMin(cand);
-              return { ymd, hhmm: cand };
-            }
-          }
+      allocate: () => {
+        const obj = { ymd: curDay, hhmm: toHHMM(curMins) };
 
-          // brak godzin – spróbuj dołożyć interwałem w tym dniu
-          const step =
-            opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
-              ? opts.matchIntervalMinutes
-              : declared.length >= 2
-                ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
-                : intervalMinutes;
+        curMins += interval;
 
-          const from = st.lastSlotMins + step;
-          const free = pickFree(ymd, from, step);
-          if (free) {
-            markUsed(ymd, free);
-            st.lastSlotMins = toMin(free);
-            return { ymd, hhmm: free };
-          }
+        if (curMins >= 24 * 60) {
+          curMins -= 24 * 60;
+          curDay = addDays(curDay, 1);
 
           if (!roundInSingleDay) {
-            // przelew na kolejny dzień – zacznij od pierwszego slotu dnia
-            roundDay = this.addDays(roundDay, 1);
-            ymd = roundDay;
-            st = ensureState(ymd);
-            const firstFree = firstSlotOfDay(ymd);
-            markUsed(ymd, firstFree);
-            st.lastSlotMins = toMin(firstFree);
-            st.slotIdx = Math.max(st.slotIdx, intervalMode ? 1 : 1); // „coś” już zużyliśmy
-            return { ymd, hhmm: firstFree };
+            curMins = toMin(firstTime);
           }
-
-          // wymuś w obrębie dnia (zawijanie)
-          let wrap = from % (24 * 60);
-          while (isUsed(ymd, toHHMM(wrap))) wrap = (wrap + step) % (24 * 60);
-          const hhmm = toHHMM(wrap);
-          markUsed(ymd, hhmm);
-          st.lastSlotMins = wrap;
-          return { ymd, hhmm };
-        } else {
-          // tryb interwałów
-          const from =
-            st.slotIdx === 0 ? toMin(first) : st.lastSlotMins + intervalMinutes;
-          st.slotIdx++;
-          const free = pickFree(ymd, from, intervalMinutes);
-          if (free) {
-            markUsed(ymd, free);
-            st.lastSlotMins = toMin(free);
-            return { ymd, hhmm: free };
-          }
-
-          if (!roundInSingleDay) {
-            roundDay = this.addDays(roundDay, 1);
-            ymd = roundDay;
-            st = ensureState(ymd);
-            const firstFree = firstSlotOfDay(ymd);
-            markUsed(ymd, firstFree);
-            st.lastSlotMins = toMin(firstFree);
-            st.slotIdx = Math.max(st.slotIdx, 1);
-            return { ymd, hhmm: firstFree };
-          }
-
-          // zawijanie w obrębie dnia
-          let wrap = from % (24 * 60);
-          while (isUsed(ymd, toHHMM(wrap)))
-            wrap = (wrap + intervalMinutes) % (24 * 60);
-          const hhmm = toHHMM(wrap);
-          markUsed(ymd, hhmm);
-          st.lastSlotMins = wrap;
-          return { ymd, hhmm };
         }
+
+        return obj;
       },
     };
   }
@@ -399,8 +468,10 @@ export class PlayoffsService {
     // --- Kolejne rundy (WINNER z poprzednich)
     let prev = r1;
     for (let r = firstRoundNo - 1; r >= 1; r--) {
-      currentRoundDay = allocator.nextRoundDay(currentRoundDay);
-      allocator.startOfRound(currentRoundDay);
+      if (!opts.roundInSingleDay) {
+        currentRoundDay = allocator.nextRoundDay(currentRoundDay);
+        allocator.startOfRound(currentRoundDay);
+      }
 
       const next: typeof prev = [];
 

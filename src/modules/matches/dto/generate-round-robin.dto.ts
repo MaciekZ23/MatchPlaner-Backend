@@ -3,10 +3,12 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsDefined,
   IsInt,
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class GenerateRoundRobinDto {
@@ -20,10 +22,11 @@ export class GenerateRoundRobinDto {
   @IsOptional()
   matchTimes?: string[];
 
-  @ApiPropertyOptional({ example: 7 })
+  @ApiPropertyOptional({ example: 1 })
   @IsInt()
-  @Min(0)
-  @IsOptional()
+  @Min(1)
+  @ValidateIf((o) => o.roundInSingleDay === false)
+  @IsDefined()
   dayInterval?: number;
 
   @ApiPropertyOptional({ example: false })

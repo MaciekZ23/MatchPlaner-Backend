@@ -344,30 +344,34 @@ export class MatchesService {
     }
 
     // 3) Opcjonalny cleanup
+    // if (dto.clearExisting) {
+    //   const toDelete = await this.prisma.match.findMany({
+    //     where: {
+    //       stageId: stage.id,
+    //       ...(dto.groupIds?.length ? { groupId: { in: dto.groupIds } } : {}),
+    //     },
+    //     select: { id: true },
+    //   });
+    //   const mids = toDelete.map((m) => m.id);
+    //   if (mids.length) {
+    //     await this.prisma.$transaction([
+    //       this.prisma.matchEvent.deleteMany({
+    //         where: { matchId: { in: mids } },
+    //       }),
+    //       this.prisma.match.deleteMany({ where: { id: { in: mids } } }),
+    //     ]);
+    //   }
+    // }
+
     if (dto.clearExisting) {
-      const toDelete = await this.prisma.match.findMany({
-        where: {
-          stageId: stage.id,
-          ...(dto.groupIds?.length ? { groupId: { in: dto.groupIds } } : {}),
-        },
-        select: { id: true },
-      });
-      const mids = toDelete.map((m) => m.id);
-      if (mids.length) {
-        await this.prisma.$transaction([
-          this.prisma.matchEvent.deleteMany({
-            where: { matchId: { in: mids } },
-          }),
-          this.prisma.match.deleteMany({ where: { id: { in: mids } } }),
-        ]);
-      }
+      await this.deleteAllByStage(stage.id);
     }
 
     // 4) Parametry kalendarza
-    const dayInterval = dto.dayInterval ?? 7;
-    const declaredTimes = (dto.matchTimes ?? []).filter(Boolean); // ['08:00','08:50',...]
-    const firstMatchTime = dto.firstMatchTime ?? '18:00';
-    const intervalMinutes = dto.matchIntervalMinutes ?? 120;
+    const dayInterval = dto.roundInSingleDay ? 0 : (dto.dayInterval ?? 0);
+    const declaredTimes = (dto.matchTimes ?? []).filter(Boolean);
+    const firstMatchTime = dto.firstMatchTime ?? '10:00';
+    const intervalMinutes = dto.matchIntervalMinutes ?? 60;
     const roundInSingleDay = dto.roundInSingleDay ?? true;
 
     // 5) Helpery dat
@@ -606,7 +610,7 @@ export class MatchesService {
 
             const { ymd, hhmm } = allocateSlot(
               roundDay,
-              /* allowNextDay */ !roundInSingleDay,
+              /* allowNextDay */ true,
             );
 
             const id = await this.nextMatchIdTx(tx);
