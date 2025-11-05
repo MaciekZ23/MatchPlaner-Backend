@@ -14,6 +14,15 @@ function isAdminEmail(email: string): boolean {
   return admins.includes(email.toLowerCase());
 }
 
+function fixUtf8(str: string | null): string | null {
+  if (!str) return str;
+  try {
+    return Buffer.from(str, 'utf8').toString();
+  } catch {
+    return str;
+  }
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -61,7 +70,7 @@ export class AuthService {
       user = await this.prisma.user.create({
         data: {
           email,
-          name: payload.name ?? null,
+          name: fixUtf8(payload.name) ?? null,
           avatarUrl: normalizedAvatar ?? null,
           role: desiredRole,
         },
@@ -70,9 +79,9 @@ export class AuthService {
       user = await this.prisma.user.update({
         where: { id: user.id },
         data: {
-          name: payload?.name ?? user.name,
+          name: payload?.name ? fixUtf8(payload.name) : user.name,
           avatarUrl: normalizedAvatar ?? user.avatarUrl,
-          role: desiredRole, // 👈 aktualizuj rolę wg listy
+          role: desiredRole,
         },
       });
     }
@@ -81,7 +90,7 @@ export class AuthService {
       sub: user.id,
       role: user.role,
       email: user.email,
-      name: user.name,
+      name: fixUtf8(user.name),
       avatar: user.avatarUrl ?? null,
       kind: 'USER',
     };
@@ -98,8 +107,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name,
-        role: user.role,
+        name: fixUtf8(user.name),
         avatarUrl: user.avatarUrl ?? null,
       },
     };

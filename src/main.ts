@@ -24,7 +24,7 @@ async function bootstrap() {
   app.set('trust proxy', 1);
 
   app.use((req, res, next) => {
-    res.setHeader('Charset', 'utf-8');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     next();
   });
 
