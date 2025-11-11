@@ -12,7 +12,6 @@ export class PlayoffsService {
   ) {}
 
   async generateForTournament(tournamentId: string, dto: GeneratePlayoffsDto) {
-    // Zbieramy zakwalifikowanych 1 i 2 miejsce
     const groups = await this.prisma.group.findMany({
       where: { tournamentId },
       orderBy: { name: 'asc' },
@@ -25,7 +24,6 @@ export class PlayoffsService {
       );
     }
 
-    // Bierzemy wszystkie mecze zakonczone czyli FINISHED
     const notFinished = await this.prisma.match.count({
       where: {
         stage: { tournamentId },
@@ -163,7 +161,6 @@ export class PlayoffsService {
     return [...left, ...right];
   }
 
-  // NEW: helpery daty/godziny (jak w RR)
   private addDays(ymd: string, days: number): string {
     const d = new Date(ymd);
     d.setDate(d.getDate() + days);
@@ -173,7 +170,6 @@ export class PlayoffsService {
   private toZonedDate(ymd: string, hhmm: string): Date {
     const [y, m, d] = ymd.split('-').map(Number);
     const [hh, mm] = hhmm.split(':').map(Number);
-    // data w CZASIE LOKALNYM serwera (nie UTC)
     return new Date(y, m - 1, d, hh, mm, 0, 0);
   }
 
@@ -392,8 +388,8 @@ export class PlayoffsService {
       return d.toISOString().slice(0, 10);
     };
 
-    let curDay = opts.startDate; // YYYY-MM-DD
-    let curMins = toMin(firstTime); // start hour
+    let curDay = opts.startDate;
+    let curMins = toMin(firstTime);
 
     return {
       startOfRound: (ymd: string) => {
@@ -430,10 +426,9 @@ export class PlayoffsService {
     const allocator = this.makeAllocator(opts);
 
     const teamsCount = firstPairs.length * 2;
-    const totalRounds = Math.ceil(Math.log2(teamsCount)); // 16→4, 8→3, 4→2
+    const totalRounds = Math.ceil(Math.log2(teamsCount));
     const firstRoundNo = totalRounds;
 
-    // licznik indeksów per runda (dla @@unique(stageId, round, index))
     const roundIndexCounters = new Map<number, number>();
     const nextIndexForRound = (roundNo: number) => {
       const cur = roundIndexCounters.get(roundNo) ?? 0;
@@ -442,7 +437,6 @@ export class PlayoffsService {
       return nxt;
     };
 
-    // --- R1 (konkretne zespoły)
     let currentRoundDay = opts.startDate;
     allocator.startOfRound(currentRoundDay);
 
@@ -465,7 +459,6 @@ export class PlayoffsService {
       }),
     );
 
-    // --- Kolejne rundy (WINNER z poprzednich)
     let prev = r1;
     for (let r = firstRoundNo - 1; r >= 1; r--) {
       if (!opts.roundInSingleDay) {
@@ -487,7 +480,6 @@ export class PlayoffsService {
             `${s.ymd}T${s.hhmm}`;
           const [early, late] = toKey(a) <= toKey(b) ? [a, b] : [b, a];
 
-          // FINAŁ ─ PÓŹNIEJSZY slot, index: 1  ✅
           const final = await this.prisma.match.create({
             data: {
               stageId,
@@ -502,7 +494,6 @@ export class PlayoffsService {
             },
           });
 
-          // 3. MIEJSCE ─ WCZEŚNIEJSZY slot, index: 2  ✅
           await this.prisma.match.create({
             data: {
               stageId,
@@ -519,7 +510,6 @@ export class PlayoffsService {
 
           next.push(final);
         } else {
-          // bez meczu o 3. miejsce – bez zmian
           const slotFinal = allocator.allocate();
           const final = await this.prisma.match.create({
             data: {
@@ -537,7 +527,6 @@ export class PlayoffsService {
           next.push(final);
         }
       } else {
-        // ...bez zmian dla innych rund (SF/QF)
         for (let i = 0; i < prev.length; i += 2) {
           const left = prev[i];
           const right = prev[i + 1] ?? null;

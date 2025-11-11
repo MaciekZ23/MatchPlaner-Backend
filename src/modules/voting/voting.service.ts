@@ -36,7 +36,6 @@ export class VotingService {
       throw new NotFoundException('Mecz nie znaleziony');
     }
 
-    // Utworzenie meta głosowania
     const voteDeadline = addHours(match.date, VOTING_WINDOW_HOURS);
     let voting = await this.prisma.voting.findUnique({ where: { matchId } });
     const now = new Date();
@@ -120,7 +119,6 @@ export class VotingService {
       }
     }
 
-    // Kandydaci do głosowania (home/away mogą być chwilowo null)
     const teamIds = [match.homeTeamId, match.awayTeamId].filter(
       (id): id is string => !!id,
     );
@@ -139,7 +137,6 @@ export class VotingService {
         })
       : [];
 
-    // Podsumowanie
     const summaries = await this.prisma.mVPVoteSummary.findMany({
       where: { matchId },
       select: { playerId: true, votes: true },
@@ -260,7 +257,6 @@ export class VotingService {
         e instanceof Prisma.PrismaClientKnownRequestError &&
         e.code === 'P2002'
       ) {
-        // Juz zagłosowane
         throw new ConflictException('You have already voted for this match');
       }
       throw e;

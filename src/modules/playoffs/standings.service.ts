@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
 
-/** Surowy widok meczu potrzebny do obliczeń tabeli */
 type RawMatch = {
   homeTeamId: string | null;
   awayTeamId: string | null;
@@ -10,7 +9,6 @@ type RawMatch = {
   status: string;
 };
 
-/** Pojedynczy wiersz tabeli roboczej */
 interface Row {
   teamId: string;
   pts: number;
@@ -25,7 +23,6 @@ interface Row {
 export class StandingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Zwraca Top2 z każdej grupy */
   async topTwoPerGroup(
     tournamentId: string,
   ): Promise<Array<{ teamId: string; group: string; place: 1 | 2 }>> {
@@ -52,7 +49,6 @@ export class StandingsService {
       [];
 
     for (const g of groups) {
-      // baza wierszy
       const rows = new Map<string, Row>();
       const teamIds = (
         await this.prisma.team.findMany({
@@ -73,7 +69,6 @@ export class StandingsService {
         });
       }
 
-      // tylko mecze zakończone i z oboma zespołami + wynikiem
       const finished = g.matches.filter((m) => {
         return (
           m.status === 'FINISHED' &&
@@ -84,7 +79,6 @@ export class StandingsService {
         );
       }) as RawMatch[];
 
-      // agregacja statystyk
       for (const m of finished) {
         const home = rows.get(m.homeTeamId!)!;
         const away = rows.get(m.awayTeamId!)!;
@@ -110,11 +104,9 @@ export class StandingsService {
         }
       }
 
-      // sort bazowy po punktach
       const table = Array.from(rows.values());
       table.sort((a, b) => b.pts - a.pts);
 
-      // rozwiązywanie remisów w klastrach
       let i = 0;
       const resolved: Row[] = [];
       while (i < table.length) {
@@ -180,7 +172,6 @@ export class StandingsService {
     return qualified;
   }
 
-  /**Metoda tworząca mini-tabelę (tylko w gronie wskazanych zespołów) */
   private buildMiniTable(
     teams: Set<string>,
     matches: RawMatch[],
@@ -227,7 +218,6 @@ export class StandingsService {
     return out;
   }
 
-  /** Porównanie dwóch drużyn wg pełnych zasad */
   private compareTwo(a: Row, b: Row, matches: RawMatch[]): number {
     if (a.pts !== b.pts) {
       return b.pts - a.pts;

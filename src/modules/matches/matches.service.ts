@@ -178,10 +178,10 @@ export class MatchesService {
         data.awayScore = dto.score ? (dto.score.away ?? null) : null;
       }
       if (dto.homeGKIds !== undefined) {
-        data.homeGKIds = dto.homeGKIds ?? []; // null => wyczyść
+        data.homeGKIds = dto.homeGKIds ?? [];
       }
       if (dto.awayGKIds !== undefined) {
-        data.awayGKIds = dto.awayGKIds ?? []; // null => wyczyść
+        data.awayGKIds = dto.awayGKIds ?? [];
       }
 
       if (Object.keys(data).length > 0) {
@@ -307,13 +307,11 @@ export class MatchesService {
     });
     if (!t) throw new NotFoundException('Tournament not found');
 
-    // 1) Stage grupowy
     const stage = await this.prisma.stage.findFirst({
       where: { tournamentId, kind: 'GROUP' },
     });
     if (!stage) throw new NotFoundException('Group stage not found');
 
-    // 2) Grupy (opcjonalny filtr)
     const groups = await this.prisma.group.findMany({
       where: {
         tournamentId,
@@ -322,8 +320,7 @@ export class MatchesService {
     });
     if (!groups.length) return { created: 0 };
 
-    // 2a) Walidacja: drużyna tylko w jednej grupie
-    const seen = new Map<string, string>(); // teamId -> groupId
+    const seen = new Map<string, string>();
     for (const g of groups) {
       const teamIds = (
         await this.prisma.team.findMany({
@@ -367,14 +364,12 @@ export class MatchesService {
       await this.deleteAllByStage(stage.id);
     }
 
-    // 4) Parametry kalendarza
     const dayInterval = dto.roundInSingleDay ? 0 : (dto.dayInterval ?? 0);
     const declaredTimes = (dto.matchTimes ?? []).filter(Boolean);
     const firstMatchTime = dto.firstMatchTime ?? '10:00';
     const intervalMinutes = dto.matchIntervalMinutes ?? 60;
     const roundInSingleDay = dto.roundInSingleDay ?? true;
 
-    // 5) Helpery dat
     const addDays = (ymd: string, days: number): string => {
       const d = new Date(ymd);
       d.setDate(d.getDate() + days);
@@ -384,7 +379,6 @@ export class MatchesService {
       return this.toLocalDate(ymd, hhmm);
     };
 
-    // 6) Berger – parowanie z obsługą BYE, doubleRound i shuffle
     const buildRounds = (teamIds: string[]) => {
       const teams = [...teamIds];
       if (dto.shuffleTeams) {
@@ -410,7 +404,6 @@ export class MatchesService {
           pairings.push(homeFirst ? [a, b] : [b, a]);
         }
         rounds.push(pairings);
-        // rotacja z „zatrzymanym” pierwszym
         const fixed = arr[0];
         arr = [fixed, ...arr.slice(-1), ...arr.slice(1, -1)];
       }
@@ -424,8 +417,7 @@ export class MatchesService {
       return rounds;
     };
 
-    // 7) GLOBALNY licznik indeksów per runda (dla @@unique(stageId, round, index))
-    const roundIndexCounters = new Map<number, number>(); // runda -> ostatni użyty index
+    const roundIndexCounters = new Map<number, number>();
     const nextIndexForRound = (roundNo: number) => {
       const cur = roundIndexCounters.get(roundNo) ?? 0;
       const nxt = cur + 1;
@@ -433,7 +425,6 @@ export class MatchesService {
       return nxt;
     };
 
-    // === GLOBALNY ALOKATOR SLOTÓW CZASOWYCH ===
     type DateState = { slotIdx: number; lastSlotMins: number };
     const toMin = (hhmm: string) => {
       const [hh, mm] = hhmm.split(':').map(Number);
@@ -460,7 +451,7 @@ export class MatchesService {
         : inferredStep;
 
     const dateState = new Map<string, DateState>();
-    const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> set("HH:mm")
+    const usedTimesPerDate = new Map<string, Set<string>>();
 
     const markUsed = (ymd: string, hhmm: string) => {
       if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
@@ -480,7 +471,7 @@ export class MatchesService {
         if (!dateState.has(d)) {
           dateState.set(d, {
             slotIdx: 0,
-            // inicjujemy na pierwszym możliwym slocie
+
             lastSlotMins: intervalMode
               ? toMin(firstMatchTime)
               : toMin(cleanTimes[0] ?? firstMatchTime),
@@ -489,7 +480,6 @@ export class MatchesService {
         return dateState.get(d)!;
       };
 
-      // pomocnik: od minuty bazowej szukaj pierwszego wolnego slotu co 'stepMins'
       const pickFree = (
         ymdLocal: string,
         baseMins: number,
@@ -501,24 +491,22 @@ export class MatchesService {
           if (!isUsed(ymdLocal, hhmm)) return hhmm;
           mins += stepMins;
         }
-        return null; // brak miejsca w tej dobie
+        return null;
       };
 
       for (;;) {
         const st = ensureState(ymd);
 
         if (!intervalMode) {
-          // 1) konsumuj podane godziny
           while (st.slotIdx < cleanTimes.length) {
             const cand = cleanTimes[st.slotIdx++];
             if (!isUsed(ymd, cand)) {
               markUsed(ymd, cand);
-              st.lastSlotMins = toMin(cand); // AKTUALIZUJEMY stan po przydziale
+              st.lastSlotMins = toMin(cand);
               return { ymd, hhmm: cand };
             }
           }
 
-          // 2) brak godzin => dokładamy w TYM SAMYM DNIU co 'step'
           const from = st.lastSlotMins + step;
           const free = pickFree(ymd, from, step);
           if (free) {
@@ -527,13 +515,11 @@ export class MatchesService {
             return { ymd, hhmm: free };
           }
 
-          // 3) doba pełna -> jeśli wolno, przejdź na kolejny dzień
           if (allowNextDay) {
             ymd = addDays(ymd, 1);
             continue;
           }
 
-          // 4) nie wolno – zawijamy w obrębie dnia (ciągle bez duplikatów)
           let wrap = from % (24 * 60);
           while (isUsed(ymd, toHHMM(wrap))) wrap = (wrap + step) % (24 * 60);
           const hhmm = toHHMM(wrap);
@@ -541,7 +527,6 @@ export class MatchesService {
           st.lastSlotMins = wrap;
           return { ymd, hhmm };
         } else {
-          // tryb interwałów
           const from =
             st.slotIdx === 0
               ? toMin(firstMatchTime)
@@ -560,7 +545,6 @@ export class MatchesService {
             continue;
           }
 
-          // zawijamy w obrębie dnia
           let wrap = from % (24 * 60);
           while (isUsed(ymd, toHHMM(wrap)))
             wrap = (wrap + intervalMinutes) % (24 * 60);
@@ -572,11 +556,9 @@ export class MatchesService {
       }
     };
 
-    // 8) Generacja
     let created = 0;
 
     await this.prisma.$transaction(async (tx) => {
-      // 8a) Zbuduj rundy dla każdej grupy
       const roundsByGroup = new Map<string, Array<Array<[string, string]>>>();
       for (const g of groups) {
         const teamIds = (
@@ -589,18 +571,15 @@ export class MatchesService {
         roundsByGroup.set(g.id, buildRounds(teamIds));
       }
 
-      // maksymalna liczba kolejek
       const maxRounds = Math.max(
         ...Array.from(roundsByGroup.values()).map((rs) => rs.length || 0),
       );
 
-      // data startu dla kolejki 1
-      let roundDay = dto.startDate; // YYYY-MM-DD
+      let roundDay = dto.startDate;
 
       for (let r = 0; r < maxRounds; r++) {
         const roundNo = r + 1;
 
-        // w tej kolejce przejdź po wszystkich grupach (unikalne godziny globalnie)
         for (const g of groups) {
           const rs = roundsByGroup.get(g.id)!;
           const pairs = rs[r] ?? [];
@@ -631,7 +610,6 @@ export class MatchesService {
           }
         }
 
-        // po całej kolejce skaczemy o dayInterval
         roundDay = addDays(roundDay, dayInterval);
       }
     });
