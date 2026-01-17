@@ -19,6 +19,10 @@ export class MatchesService {
     private readonly playoffs: PlayoffsService,
   ) {}
 
+  /**
+   * Konwertuje lokalny zapis daty ISO bez strefy czasowej
+   * na obiekt Date w lokalnej strefie czasowej
+   */
   private fromLocalISO(input: string): Date {
     if (/([zZ]|[+\-]\d{2}:\d{2})$/.test(input)) return new Date(input);
 
@@ -28,12 +32,19 @@ export class MatchesService {
     return new Date(y, m - 1, d, hh, mm, ss, 0);
   }
 
+  /**
+   * Tworzy obiekt Date na podstawie daty YYYY-MM-DD
+   * oraz godziny HH:mm w lokalnej strefie czasowej
+   */
   private toLocalDate(ymd: string, hhmm: string): Date {
     const [y, m, d] = ymd.split('-').map(Number);
     const [hh, mm] = hhmm.split(':').map(Number);
     return new Date(y, m - 1, d, hh, mm, 0, 0);
   }
 
+  /**
+   * Generuje kolejny unikalny identyfikator meczu np. M1, M2, M3
+   */
   private async nextMatchIdTx(tx: Prisma.TransactionClient): Promise<string> {
     const existing = await tx.idCounter.findUnique({ where: { key: 'match' } });
 
@@ -63,6 +74,10 @@ export class MatchesService {
     return `M${created.value}`;
   }
 
+  /**
+   * Zwraca listę meczów przypisanych do danego etapu turnieju,
+   * posortowaną według daty oraz numeru rundy
+   */
   async listByStage(stageId: string): Promise<MatchDto[]> {
     const stage = await this.prisma.stage.findUnique({
       where: { id: stageId },
@@ -78,6 +93,9 @@ export class MatchesService {
     return matches.map(toMatchDto);
   }
 
+  /**
+   * Tworzy nowy mecz wraz z opcjonalnymi zdarzeniami meczowymi
+   */
   async create(dto: CreateMatchDto): Promise<MatchDto> {
     await this.ensureStageExists(dto.stageId);
 
@@ -125,6 +143,10 @@ export class MatchesService {
     return toMatchDto(created!);
   }
 
+  /**
+   * Aktualizuje dane istniejącego meczu oraz jego zdarzenia
+   * Po zapisaniu wyniku propaguje rezultat do fazy pucharowej
+   */
   async update(id: string, dto: UpdateMatchDto): Promise<MatchDto> {
     const existing = await this.prisma.match.findUnique({ where: { id } });
     if (!existing) {
@@ -238,6 +260,9 @@ export class MatchesService {
     return toMatchDto(result!);
   }
 
+  /**
+   * Usuwa pojedynczy mecz wraz z przypisanymi zdarzeniami
+   */
   async deleteOne(id: string): Promise<void> {
     const existing = await this.prisma.match.findUnique({ where: { id } });
     if (!existing) {
@@ -249,6 +274,9 @@ export class MatchesService {
     ]);
   }
 
+  /**
+   * Usuwa wszystkie mecze powiązane z danym turniejem
+   */
   async deleteAllByTournament(
     tournamentId: string,
   ): Promise<{ count: number }> {
@@ -281,6 +309,9 @@ export class MatchesService {
     return { count: matchIds.length };
   }
 
+  /**
+   * Usuwa wszystkie mecze przypisane do danego etapu turnieju
+   */
   async deleteAllByStage(stageId: string): Promise<{ count: number }> {
     await this.ensureStageExists(stageId);
 
@@ -298,6 +329,17 @@ export class MatchesService {
     return { count: ids.length };
   }
 
+  /**
+   * Generuje harmonogram meczów w systemie round-robin
+   * dla fazy grupowej turnieju
+   *
+   * Uwzględnia:
+   * - podział na grupy
+   * - opcjonalne czyszczenie istniejących meczów
+   * - losowanie drużyn
+   * - mecze rewanżowe
+   * - interwały czasowe i dni rozgrywek
+   */
   async generateRoundRobin(
     tournamentId: string,
     dto: GenerateRoundRobinDto,
@@ -339,26 +381,6 @@ export class MatchesService {
         seen.set(tid, g.id);
       }
     }
-
-    // 3) Opcjonalny cleanup
-    // if (dto.clearExisting) {
-    //   const toDelete = await this.prisma.match.findMany({
-    //     where: {
-    //       stageId: stage.id,
-    //       ...(dto.groupIds?.length ? { groupId: { in: dto.groupIds } } : {}),
-    //     },
-    //     select: { id: true },
-    //   });
-    //   const mids = toDelete.map((m) => m.id);
-    //   if (mids.length) {
-    //     await this.prisma.$transaction([
-    //       this.prisma.matchEvent.deleteMany({
-    //         where: { matchId: { in: mids } },
-    //       }),
-    //       this.prisma.match.deleteMany({ where: { id: { in: mids } } }),
-    //     ]);
-    //   }
-    // }
 
     if (dto.clearExisting) {
       await this.deleteAllByStage(stage.id);
@@ -617,6 +639,9 @@ export class MatchesService {
     return { created };
   }
 
+  /**
+   * Sprawdza czy etap turnieju istnieje w bazie danych
+   */
   private async ensureStageExists(stageId: string): Promise<void> {
     const s = await this.prisma.stage.findUnique({ where: { id: stageId } });
     if (!s) {

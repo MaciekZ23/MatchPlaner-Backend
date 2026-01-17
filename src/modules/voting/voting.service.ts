@@ -23,6 +23,15 @@ const VOTING_WINDOW_HOURS = 48;
 export class VotingService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Zwraca aktualny stan głosowania MVP dla danego meczu.
+   *
+   * Metoda:
+   * - inicjalizuje głosowanie, jeśli jeszcze nie istnieje
+   * - automatycznie aktualizuje status NOT_STARTED / OPEN / CLOSED
+   * - pobiera listę zawodników biorących udział w meczu
+   * - sprawdza czy użytkownik oddał już głos
+   */
   async getState(matchId: string, user?: JwtUser): Promise<VotingStateDto> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
@@ -163,6 +172,15 @@ export class VotingService {
     });
   }
 
+  /**
+   * Rejestruje głos użytkownika na zawodnika MVP meczu
+   *
+   * Metoda:
+   * weryfikuje stan meczu i głosowania
+   * sprawdza przynależność zawodnika do meczu
+   * zapobiega wielokrotnemu głosowaniu
+   * aktualizuje zagregowaną liczbę głosów
+   */
   async vote(req: VoteRequestDto, user: JwtUser): Promise<VoteResponseDto> {
     if (!user) {
       throw new BadRequestException('Authentication required');
@@ -264,6 +282,9 @@ export class VotingService {
     return { ok: true, matchId, playerId };
   }
 
+  /**
+   * Ustawia ręcznie status głosowania dla meczu
+   */
   async setStatus(matchId: string, status: 'NOT_STARTED' | 'OPEN' | 'CLOSED') {
     return this.prisma.voting.update({
       where: { matchId },
@@ -276,6 +297,12 @@ export class VotingService {
   }
 }
 
+/**
+ * Tworzy anonimowy identyfikator głosującego
+ * na podstawie danych użytkownika lub gościa
+ *
+ * Zapobiega wielokrotnemu głosowaniu przy zachowaniu anonimowości
+ */
 function resolveVoter(user: any): { type: 'USER' | 'GUEST'; hash: string } {
   if (user.role && user.role !== 'GUEST') {
     const hash = sha256(`U:${user.sub}`);
@@ -290,10 +317,16 @@ function resolveVoter(user: any): { type: 'USER' | 'GUEST'; hash: string } {
   return { type: 'GUEST', hash };
 }
 
+/**
+ * Generuje skrót SHA-256 dla podanego ciągu znaków
+ */
 function sha256(x: string) {
   return crypto.createHash('sha256').update(x).digest('hex');
 }
 
+/**
+ * Zwraca nową datę przesuniętą o określoną liczbę godzin
+ */
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 3600 * 1000);
 }

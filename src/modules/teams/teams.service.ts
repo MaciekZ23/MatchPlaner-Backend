@@ -13,6 +13,9 @@ import { UpdateTeamDto } from './dto/update-team.dto';
 export class TeamsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Zwraca listę drużyn przypisanych do danego turnieju
+   */
   async listByTournament(tournamentId: string): Promise<TeamDto[]> {
     const exists = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -28,6 +31,10 @@ export class TeamsService {
     return teams.map((t) => toTeamDto(t as any));
   }
 
+  /**
+   * Zwraca listę wszystkich zawodników biorących udział
+   * w danym turnieju, niezależnie od drużyny
+   */
   async getPlayersByTournament(tournamentId: string): Promise<PlayerDto[]> {
     const exists = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -42,6 +49,9 @@ export class TeamsService {
     return players.map(toPlayerDto);
   }
 
+  /**
+   * Generuje kolejny unikalny identyfikator drużyny np. T1, T2
+   */
   private async nextTeamIdTx(tx: Prisma.TransactionClient): Promise<string> {
     const existing = await tx.idCounter.findUnique({ where: { key: 'team' } });
     if (existing) {
@@ -65,6 +75,9 @@ export class TeamsService {
     return `T${created.value}`;
   }
 
+  /**
+   * Tworzy nową drużynę w ramach wskazanego turnieju
+   */
   async createForTournament(
     tournamentId: string,
     body: CreateTeamDto,
@@ -95,6 +108,9 @@ export class TeamsService {
     return toTeamDto(created as any);
   }
 
+  /**
+   * Generuje kolejny unikalny identyfikator zawodnika np. P1, P2
+   */
   private async nextPlayerIdTx(tx: Prisma.TransactionClient): Promise<string> {
     const existing = await tx.idCounter.findUnique({
       where: { key: 'player' },
@@ -120,6 +136,9 @@ export class TeamsService {
     return `P${created.value}`;
   }
 
+  /**
+   * Dodaje nowego zawodnika do wskazanej drużyny
+   */
   async createPlayer(
     teamId: string,
     body: CreatePlayerDto,
@@ -149,6 +168,10 @@ export class TeamsService {
     return toPlayerDto(created);
   }
 
+  /**
+   * Aktualizuje dane drużyny, w tym nazwę, logo
+   * oraz przypisanie do grupy turniejowej
+   */
   async updateTeam(teamId: string, body: UpdateTeamDto): Promise<TeamDto> {
     const exists = await this.prisma.team.findUnique({
       where: { id: teamId },
@@ -193,6 +216,9 @@ export class TeamsService {
     return toTeamDto(updated as any);
   }
 
+  /**
+   * Usuwa drużynę wraz z przypisanymi do niej zawodnikami
+   */
   async deleteTeam(teamId: string): Promise<void> {
     const team = await this.prisma.team.findUnique({ where: { id: teamId } });
     if (!team) {
@@ -205,6 +231,9 @@ export class TeamsService {
     });
   }
 
+  /**
+   * Aktualizuje dane zawodnika należącego do drużyny
+   */
   async updatePlayer(
     playerId: string,
     body: UpdatePlayerDto,
@@ -238,6 +267,9 @@ export class TeamsService {
     return toPlayerDto(updated);
   }
 
+  /**
+   * Usuwa pojedynczego zawodnika
+   */
   async deletePlayer(playerId: string): Promise<void> {
     const player = await this.prisma.player.findUnique({
       where: { id: playerId },

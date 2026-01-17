@@ -11,6 +11,10 @@ export type JwtPayload = {
   avatarUrl?: string;
 };
 
+/**
+ * Strategia JWT wykorzystywana przez Passport
+ * Odpowiada za weryfikację tokenu oraz ekstrakcję danych użytkownika
+ */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
@@ -21,6 +25,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /**
+   * Metoda wywoływana po poprawnej weryfikacji tokenu JWT
+   * Zwrócony obiekt trafia do req.user
+   */
   async validate(payload: JwtPayload) {
     return payload;
   }

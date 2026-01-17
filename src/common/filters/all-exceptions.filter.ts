@@ -9,6 +9,19 @@ import {
 import { Response } from 'express';
 import { Logger } from 'nestjs-pino';
 
+/**
+ * Globalny filtr wyjątków odpowiedzialny za obsługę
+ * wszystkich błędów występujących w aplikacji
+ *
+ * Filtr:
+ * przechwytuje wyjątki HTTP oraz nieoczekiwane błędy
+ * mapuje je na spójny format odpowiedzi JSON
+ * loguje szczegóły błędów z wykorzystaniem systemu logowania
+ * ukrywa szczegóły techniczne np. stack trace w środowisku produkcyjnym
+ *
+ * Dzięki temu mechanizmowi aplikacja jest bezpieczniejsza
+ * oraz dostarcza jednolite odpowiedzi błędów dla klienta
+ */
 @Injectable()
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {

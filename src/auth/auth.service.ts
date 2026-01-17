@@ -31,11 +31,19 @@ export class AuthService {
     private cfg: ConfigService,
   ) {}
 
+  /**
+   * Generuje krótkożyjący token dostępu
+   * Token wykorzystywany jest do autoryzacji żądań API
+   */
   private async signAccessToken(payload: Record<string, any>) {
     const expiresIn = this.cfg.get<string>('JWT_EXPIRES_IN') || '15m';
     return this.jwt.signAsync(payload, { expiresIn });
   }
 
+  /**
+   * Generuje długowieczny token odświeżania
+   * Służy do uzyskania nowego access tokena po jego wygaśnięciu
+   */
   private async signRefreshToken(payload: Record<string, any>) {
     const secret =
       this.cfg.get<string>('REFRESH_JWT_SECRET') || this.cfg.get('JWT_SECRET')!;
@@ -43,6 +51,11 @@ export class AuthService {
     return this.jwt.signAsync(payload, { secret, expiresIn });
   }
 
+  /**
+   * Weryfikuje token Google ID oraz loguje użytkownika
+   * Jeśli użytkownik nie istnieje w bazie danych, zostaje utworzony
+   * W przeciwnym razie jego dane są aktualizowane
+   */
   async verifyGoogleAndLogin(idToken: string) {
     let payload: any;
     try {
@@ -113,6 +126,10 @@ export class AuthService {
     };
   }
 
+  /**
+   * Logowanie gościa bez konta użytkownika
+   * Tworzony jest tymczasowy identyfikator oraz token JWT.
+   */
   async guestLogin(deviceId: string) {
     if (!deviceId) {
       throw new UnauthorizedException('deviceId required');
@@ -138,6 +155,9 @@ export class AuthService {
     };
   }
 
+  /**
+   * Odświeżanie tokenu dostępu na podstawie refresh tokena
+   */
   async refreshToken(refreshToken: string) {
     try {
       const secret =

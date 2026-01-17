@@ -1,6 +1,17 @@
 import { ArgumentMetadata, Injectable, PipeTransform } from '@nestjs/common';
 import sanitizeHtml from 'sanitize-html';
 
+/**
+ * Pipe odpowiedzialny za sanityzację danych wejściowych
+ * Usuwa potencjalnie niebezpieczne znaczniki HTML, skrypty
+ * oraz znaki kontrolne z danych przesyłanych przez użytkownika
+ *
+ * Mechanizm ten zabezpiecza aplikację przed atakami XSS
+ * oraz niepożądanym kodem wprowadzanym w polach tekstowych
+ *
+ * Pipe działa rekurencyjnie na stringach, obiektach oraz tablicach,
+ * pomijając dane binarne np. pliki
+ */
 @Injectable()
 export class SanitizePipe implements PipeTransform {
   transform(value: any, metadata: ArgumentMetadata) {

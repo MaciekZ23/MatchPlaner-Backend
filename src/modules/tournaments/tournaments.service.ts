@@ -8,6 +8,10 @@ import { Prisma, $Enums } from '@prisma/client';
 export class TournamentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Generuje kolejny unikalny identyfikator turnieju
+   * np. t1, t2, t3
+   */
   private async nextTournamentIdTx(
     tx: Prisma.TransactionClient,
   ): Promise<string> {
@@ -38,6 +42,10 @@ export class TournamentsService {
     return `t${created.value}`;
   }
 
+  /**
+   * Konwertuje indeks liczbowy na identyfikator alfabetyczny
+   * A, B, ..., Z, AA, AB,
+   */
   private alphaId(index0: number): string {
     let n = index0 + 1,
       out = '';
@@ -48,6 +56,11 @@ export class TournamentsService {
     }
     return out;
   }
+
+  /**
+   * Konwertuje identyfikator alfabetyczny grupy
+   * na wartość liczbową
+   */
   private alphaToNum(s: string): number {
     let n = 0;
     for (const ch of s.toUpperCase()) {
@@ -58,6 +71,10 @@ export class TournamentsService {
     return n;
   }
 
+  /**
+   * Generuje kolejny identyfikator grupy turniejowej
+   * w postaci literowej (A, B, C, ...)
+   */
   private async nextGroupIdTx(tx: Prisma.TransactionClient): Promise<string> {
     const key = 'group';
     const existing = await tx.idCounter.findUnique({ where: { key } });
@@ -80,6 +97,10 @@ export class TournamentsService {
     return this.alphaId(created.value - 1);
   }
 
+  /**
+   * Generuje unikalny identyfikator etapu turnieju
+   * w zależności od jego rodzaju GROUP / PLAYOFF
+   */
   private async nextStageIdTx(
     tx: Prisma.TransactionClient,
     kind: $Enums.StageKind,
@@ -116,6 +137,10 @@ export class TournamentsService {
     return `${prefix}-${created.value}`;
   }
 
+  /**
+   * Zwraca szczegóły pojedynczego turnieju
+   * wraz z przypisanymi grupami i etapami
+   */
   async findOne(id: string) {
     const t = await this.prisma.tournament.findUnique({
       where: { id },
@@ -128,6 +153,10 @@ export class TournamentsService {
     return toTournamentDto(t);
   }
 
+  /**
+   * Zwraca listę wszystkich turniejów
+   * wraz z ich strukturą organizacyjną
+   */
   async findAll() {
     const rows = await this.prisma.tournament.findMany({
       include: { groups: true, stages: true },
@@ -136,6 +165,10 @@ export class TournamentsService {
     return rows.map(toTournamentDto);
   }
 
+  /**
+   * Tworzy nowy turniej wraz z opcjonalnymi
+   * grupami oraz etapami rozgrywek
+   */
   async create(dto: CreateTournamentDto) {
     const created = await this.prisma.$transaction(async (tx) => {
       const newId = await this.nextTournamentIdTx(tx);
@@ -215,6 +248,10 @@ export class TournamentsService {
     return toTournamentDto(created);
   }
 
+  /**
+   * Usuwa etapy turnieju wraz z powiązanymi
+   * meczami, zdarzeniami oraz głosami MVP
+   */
   private async safeDeleteStagesTx(
     tx: Prisma.TransactionClient,
     stageIds: string[],
@@ -241,6 +278,12 @@ export class TournamentsService {
     await tx.stage.deleteMany({ where: { id: { in: stageIds } } });
   }
 
+  /**
+   * Aktualizuje dane turnieju w tym:
+   * informacje podstawowe
+   * grupy turniejowe
+   * etapy rozgrywek
+   */
   async update(id: string, dto: UpdateTournamentDto) {
     return this.prisma.$transaction(async (tx) => {
       const exists = await tx.tournament.findUnique({ where: { id } });
@@ -343,6 +386,10 @@ export class TournamentsService {
     });
   }
 
+  /**
+   * Usuwa turniej wraz ze wszystkimi powiązanymi danymi:
+   * etapami, meczami, drużynami, zawodnikami oraz głosami
+   */
   async delete(id: string) {
     await this.prisma.$transaction(async (tx) => {
       const stageIds = (

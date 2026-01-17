@@ -3,6 +3,10 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
+/**
+ * Guard odpowiedzialny za ochronę endpointów przy użyciu JWT
+ * Umożliwia oznaczenie wybranych endpointów jako publiczne
+ */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(private reflector: Reflector) {

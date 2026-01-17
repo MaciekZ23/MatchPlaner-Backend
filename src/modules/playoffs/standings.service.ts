@@ -23,6 +23,15 @@ interface Row {
 export class StandingsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Wyznacza dwie najlepsze drużyny z każdej grupy turnieju
+   *
+   * Metoda:
+   * - buduje tabelę ligową dla każdej grupy
+   * - uwzględnia tylko zakończone mecze
+   * - rozstrzyga remisy punktowe zgodnie z przyjętymi kryteriami
+   * - zwraca listę zakwalifikowanych zespołów wraz z miejscem
+   */
   async topTwoPerGroup(
     tournamentId: string,
   ): Promise<Array<{ teamId: string; group: string; place: 1 | 2 }>> {
@@ -172,6 +181,13 @@ export class StandingsService {
     return qualified;
   }
 
+  /**
+   * Buduje mini-tabelę dla zestawu drużyn
+   * na podstawie ich bezpośrednich spotkań
+   *
+   * Mini-tabela wykorzystywana jest do rozstrzygania
+   * remisów pomiędzy więcej niż dwiema drużynami
+   */
   private buildMiniTable(
     teams: Set<string>,
     matches: RawMatch[],
@@ -218,6 +234,9 @@ export class StandingsService {
     return out;
   }
 
+  /**
+   * Porównuje dwie drużyny w przypadku remisu punktowego
+   */
   private compareTwo(a: Row, b: Row, matches: RawMatch[]): number {
     if (a.pts !== b.pts) {
       return b.pts - a.pts;

@@ -11,6 +11,16 @@ export class PlayoffsService {
     private readonly standings: StandingsService,
   ) {}
 
+  /**
+   * Generuje fazę pucharową dla danego turnieju
+   *
+   * Metoda:
+   * weryfikuje zakończenie fazy grupowej
+   * pobiera zakwalifikowane drużyny
+   * tworzy etap playoff
+   * opcjonalnie usuwa istniejące mecze
+   * generuje pełną drabinkę pucharową
+   */
   async generateForTournament(tournamentId: string, dto: GeneratePlayoffsDto) {
     const groups = await this.prisma.group.findMany({
       where: { tournamentId },
@@ -92,6 +102,10 @@ export class PlayoffsService {
     return created;
   }
 
+  /**
+   * Zapewnia istnienie etapu typu PLAYOFF dla danego turnieju
+   * Jeśli etap już istnieje, zostaje zwrócony, w przeciwnym razie tworzony jest nowy
+   */
   private async ensurePlayoffStage(tournamentId: string, name: string) {
     const exist = await this.prisma.stage.findFirst({
       where: { tournamentId, kind: 'PLAYOFF' },
@@ -116,6 +130,14 @@ export class PlayoffsService {
     });
   }
 
+  /**
+   * Buduje pary pierwszej rundy fazy pucharowej na podstawie wyników fazy grupowej
+   *
+   * Algorytm łączy:
+   * - zwycięzcę grupy z wicemistrzem innej grupy
+   * - zapewnia brak powtórzeń drużyn
+   * - wymaga parzystej liczby grup
+   */
   private buildFirstRoundPairs(
     groups: string[],
     q: QualifiedTeam[],
@@ -161,213 +183,33 @@ export class PlayoffsService {
     return [...left, ...right];
   }
 
+  /**
+   * Zwraca datę powiększoną o określoną liczbę dni
+   */
   private addDays(ymd: string, days: number): string {
     const d = new Date(ymd);
     d.setDate(d.getDate() + days);
     return d.toISOString().slice(0, 10);
   }
 
+  /**
+   * Tworzy obiekt Date na podstawie daty i godziny
+   * w lokalnej strefie czasowej
+   */
   private toZonedDate(ymd: string, hhmm: string): Date {
     const [y, m, d] = ymd.split('-').map(Number);
     const [hh, mm] = hhmm.split(':').map(Number);
     return new Date(y, m - 1, d, hh, mm, 0, 0);
   }
 
-  // NEW: alokator slotów czasowych – wersja bez allocateWrapper
-  // private makeAllocator(opts: SchedulingOptions) {
-  //   const dayInterval = opts.dayInterval ?? 0;
-  //   const roundInSingleDay = opts.roundInSingleDay ?? true;
-
-  //   const toMin = (hhmm: string) => {
-  //     const [hh, mm] = hhmm.split(':').map(Number);
-  //     return hh * 60 + mm;
-  //   };
-  //   const toHHMM = (mins: number) => {
-  //     const h = Math.floor(mins / 60) % 24;
-  //     const m = mins % 60;
-  //     const pad = (n: number) => String(n).padStart(2, '0');
-  //     return `${pad(h)}:${pad(m)}`;
-  //   };
-
-  //   const declared = Array.from(new Set(opts.matchTimes ?? []))
-  //     .map((s) => s.trim())
-  //     .filter(Boolean)
-  //     .sort((a, b) => a.localeCompare(b));
-
-  //   const intervalMode = declared.length === 0;
-  //   const first = opts.firstMatchTime ?? '18:00';
-  //   const intervalMinutes = opts.matchIntervalMinutes ?? 120;
-
-  //   // stan per data
-  //   type DateState = { slotIdx: number; lastSlotMins: number };
-  //   const dateState = new Map<string, DateState>();
-  //   const usedTimesPerDate = new Map<string, Set<string>>(); // ymd -> Set('HH:mm')
-
-  //   const markUsed = (ymd: string, hhmm: string) => {
-  //     if (!usedTimesPerDate.has(ymd)) usedTimesPerDate.set(ymd, new Set());
-  //     usedTimesPerDate.get(ymd)!.add(hhmm);
-  //   };
-  //   const isUsed = (ymd: string, hhmm: string) =>
-  //     usedTimesPerDate.get(ymd)?.has(hhmm) ?? false;
-
-  //   const ensureState = (d: string): DateState => {
-  //     if (!dateState.has(d)) {
-  //       dateState.set(d, {
-  //         slotIdx: 0,
-  //         lastSlotMins: intervalMode
-  //           ? toMin(first)
-  //           : toMin(declared[0] ?? first),
-  //       });
-  //     }
-  //     return dateState.get(d)!;
-  //   };
-
-  //   const pickFree = (
-  //     ymdLocal: string,
-  //     baseMins: number,
-  //     stepMins: number,
-  //   ): string | null => {
-  //     let mins = baseMins;
-  //     while (mins < 24 * 60) {
-  //       const hhmm = toHHMM(mins);
-  //       if (!isUsed(ymdLocal, hhmm)) return hhmm;
-  //       mins += stepMins;
-  //     }
-  //     return null;
-  //   };
-
-  //   // narzędzia do startowania od "początku dnia"
-  //   const firstSlotOfDay = (ymdLocal: string): string => {
-  //     if (!intervalMode) {
-  //       // najpierw spróbuj pierwszej z listy; jak zajęta, weź kolejną o krok=step
-  //       const step =
-  //         opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
-  //           ? opts.matchIntervalMinutes
-  //           : declared.length >= 2
-  //             ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
-  //             : intervalMinutes;
-  //       const base = toMin(declared[0] ?? first);
-  //       return pickFree(ymdLocal, base, step) ?? declared[0] ?? first;
-  //     } else {
-  //       const base = toMin(first);
-  //       return pickFree(ymdLocal, base, intervalMinutes) ?? first;
-  //     }
-  //   };
-
-  //   // sterowanie datą rundy
-  //   let roundDay = opts.startDate; // YYYY-MM-DD
-
-  //   return {
-  //     startOfRound: (ymd: string) => {
-  //       roundDay = ymd;
-  //     },
-  //     nextRoundDay: (ymd: string) => this.addDays(ymd, dayInterval),
-
-  //     allocate: (): { ymd: string; hhmm: string } => {
-  //       let ymd = roundDay;
-  //       let st = ensureState(ymd);
-
-  //       if (!intervalMode) {
-  //         // tryb z listą godzin
-  //         while (st.slotIdx < declared.length) {
-  //           const cand = declared[st.slotIdx++];
-  //           if (!isUsed(ymd, cand)) {
-  //             markUsed(ymd, cand);
-  //             st.lastSlotMins = toMin(cand);
-  //             return { ymd, hhmm: cand };
-  //           }
-  //         }
-
-  //         // brak godzin – spróbuj dołożyć interwałem w tym dniu
-  //         const step =
-  //           opts.matchIntervalMinutes && opts.matchIntervalMinutes > 0
-  //             ? opts.matchIntervalMinutes
-  //             : declared.length >= 2
-  //               ? Math.max(1, toMin(declared[1]) - toMin(declared[0]))
-  //               : intervalMinutes;
-
-  //         const from = st.lastSlotMins + step;
-  //         const free = pickFree(ymd, from, step);
-  //         if (free) {
-  //           markUsed(ymd, free);
-  //           st.lastSlotMins = toMin(free);
-  //           return { ymd, hhmm: free };
-  //         }
-
-  //         if (!roundInSingleDay) {
-  //           // przelew na kolejny dzień – zacznij od pierwszego slotu dnia
-  //           roundDay = this.addDays(roundDay, 1);
-  //           ymd = roundDay;
-  //           st = ensureState(ymd);
-  //           const firstFree = firstSlotOfDay(ymd);
-  //           markUsed(ymd, firstFree);
-  //           st.lastSlotMins = toMin(firstFree);
-  //           st.slotIdx = Math.max(st.slotIdx, intervalMode ? 1 : 1); // „coś” już zużyliśmy
-  //           return { ymd, hhmm: firstFree };
-  //         }
-
-  //         // wymuś w obrębie dnia (zawijanie)
-  //         let mins = from;
-  //         while (isUsed(ymd, toHHMM(mins))) {
-  //           mins += step;
-  //         }
-
-  //         // jeśli przekroczyliśmy 24h → przejdź do następnego dnia (nocny turniej)
-  //         if (mins >= 24 * 60) {
-  //           roundDay = this.addDays(roundDay, 1);
-  //           ymd = roundDay;
-  //           mins = mins - 24 * 60;
-  //         }
-
-  //         const hhmm = toHHMM(mins);
-  //         markUsed(ymd, hhmm);
-  //         st.lastSlotMins = mins;
-  //         return { ymd, hhmm };
-  //       } else {
-  //         // tryb interwałów
-  //         const from =
-  //           st.slotIdx === 0 ? toMin(first) : st.lastSlotMins + intervalMinutes;
-  //         st.slotIdx++;
-  //         const free = pickFree(ymd, from, intervalMinutes);
-  //         if (free) {
-  //           markUsed(ymd, free);
-  //           st.lastSlotMins = toMin(free);
-  //           return { ymd, hhmm: free };
-  //         }
-
-  //         if (!roundInSingleDay) {
-  //           roundDay = this.addDays(roundDay, 1);
-  //           ymd = roundDay;
-  //           st = ensureState(ymd);
-  //           const firstFree = firstSlotOfDay(ymd);
-  //           markUsed(ymd, firstFree);
-  //           st.lastSlotMins = toMin(firstFree);
-  //           st.slotIdx = Math.max(st.slotIdx, 1);
-  //           return { ymd, hhmm: firstFree };
-  //         }
-
-  //         // zawijanie w obrębie dnia
-  //         let mins = from;
-  //         while (isUsed(ymd, toHHMM(mins))) {
-  //           mins += intervalMinutes;
-  //         }
-
-  //         // jeśli przeszliśmy po północy -> robimy nocny ciąg
-  //         if (mins >= 24 * 60) {
-  //           roundDay = this.addDays(roundDay, 1);
-  //           ymd = roundDay;
-  //           mins = mins - 24 * 60;
-  //         }
-
-  //         const hhmm = toHHMM(mins);
-  //         markUsed(ymd, hhmm);
-  //         st.lastSlotMins = mins;
-  //         return { ymd, hhmm };
-  //       }
-  //     },
-  //   };
-  // }
-
+  /**
+   * Tworzy alokator terminów meczów fazy pucharowej
+   *
+   * Mechanizm odpowiada za:
+   * przydzielanie godzin rozpoczęcia meczów
+   * obsługę interwałów czasowych
+   * przechodzenie do kolejnych dni rozgrywek
+   */
   private makeAllocator(opts: SchedulingOptions) {
     const interval = opts.matchIntervalMinutes ?? 60;
     const roundInSingleDay = opts.roundInSingleDay ?? true;
@@ -418,6 +260,15 @@ export class PlayoffsService {
     };
   }
 
+  /**
+   * Tworzy pełną strukturę drabinki pucharowej
+   *
+   * Metoda:
+   * generuje mecze kolejnych rund
+   * wiąże mecze poprzez referencje do zwycięzców i przegranych
+   * opcjonalnie tworzy mecz o trzecie miejsce
+   * zapisuje całą strukturę w bazie danych
+   */
   private async createBracketTree(
     stageId: string,
     firstPairs: Pair<QualifiedTeam>[],
@@ -558,6 +409,9 @@ export class PlayoffsService {
     });
   }
 
+  /**
+   * Określa zwycięzcę i przegranego meczu na podstawie wyniku końcowego
+   */
   private pickWinnerLoser(m: {
     status: string;
     homeTeamId: string | null;
@@ -582,6 +436,13 @@ export class PlayoffsService {
     };
   }
 
+  /**
+   * Propaguje wynik zakończonego meczu do kolejnych rund drabinki
+   *
+   * Na podstawie zwycięzcy i przegranego:
+   * aktualizuje drużyny w meczach zależnych,
+   * czyści powiązania w przypadku cofnięcia wyniku
+   */
   async propagateMatchOutcome(matchId: string): Promise<void> {
     const m = await this.prisma.match.findUnique({
       where: { id: matchId },
